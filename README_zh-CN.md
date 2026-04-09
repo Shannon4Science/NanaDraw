@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🎨 NanaDraw
+<img src="image/NanaDraw_logo.jpg" alt="NanaDraw logo" width="220">
+
+# NanaDraw
 
 **将学术论文中的方法描述转换为可编辑的流程图**
 

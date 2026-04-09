@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🎨 NanaDraw
+<img src="image/NanaDraw_logo.jpg" alt="NanaDraw logo" width="220">
+
+# NanaDraw
 
 **Turn academic paper method descriptions into editable pipeline diagrams**
 
