@@ -1,0 +1,16 @@
+# Draw.io is a large vendored dependency
+drawio/** linguist-vendored
+drawio/**/*.js linguist-generated
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+
+# Frontend lock file
+frontend/pnpm-lock.yaml linguist-generated

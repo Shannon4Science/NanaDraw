@@ -76,7 +76,7 @@ The built-in asset workshop combines Bioicons, user-managed assets, and AI-gener
 - **Gallery**: Download reference images: `python scripts/download_gallery.py`
 - **Bioicons**: Download SVG icons: `python scripts/download_bioicons.py`
 
-Both are optional. Docker images include all data pre-installed.
+Both are optional and will be prompted during first startup.
 
 ## Install & Deploy
 
@@ -90,8 +90,8 @@ Both are optional. Docker images include all data pre-installed.
 ### One-Click Start
 
 ```bash
-git clone https://github.com/opennanadraw/opennanadraw.git
-cd opennanadraw
+git clone https://github.com/Shannon4Science/NanaDraw.git
+cd NanaDraw
 python start.py
 ```
 
@@ -101,6 +101,20 @@ The script will:
 3. Build the frontend
 4. Start the server and open your browser
 
+### Background Running
+
+To run NanaDraw as a background process:
+
+```bash
+nohup python start.py > nanadraw.log 2>&1 &
+```
+
+View the log at any time with `tail -f nanadraw.log`. To stop the process, find the PID and kill it:
+
+```bash
+kill $(cat nanadraw.pid 2>/dev/null || ps aux | grep 'start.py' | grep -v grep | awk '{print $2}')
+```
+
 ### Development Mode
 
 ```bash
@@ -109,32 +123,21 @@ python start.py --dev
 
 This starts both the Vite dev server and the backend API server.
 
-### Docker
-
-```bash
-# Standard
-docker build -f docker/Dockerfile -t nanadraw .
-docker run -p 8001:8001 nanadraw
-
-# China mirror (faster for CN users)
-docker build -f docker/Dockerfile.cn -t nanadraw .
-docker run -p 8001:8001 nanadraw
-```
-
 ### Configuration
 
 After starting, click the ⚙️ gear icon in the top-right corner to configure:
 
 - **API Key**: Your LLM provider API key
 - **API Base URL**: Custom endpoint (leave empty for default)
-- **Text Model**: Default `gemini-2.5-pro-preview-06-05`
-- **Image Model**: Default `gemini-2.0-flash-preview-image-generation`
+- **Text Model**: Default `gemini-3.1-pro-preview`
+- **Image Model**: Default `gemini-3-pro-image-preview`
+- **Component Model**: Default `gemini-3.1-flash-image-preview`
 - **NanaSoul**: Custom AI persona for style constraints
 
 ## Architecture
 
 ```
-nanadraw/
+NanaDraw/
 ├── frontend/          # React + TypeScript + Vite + TailwindCSS
 │   └── src/
 ├── backend/           # FastAPI + Python
@@ -146,8 +149,7 @@ nanadraw/
 │   └── requirements.txt
 ├── drawio/            # draw.io fork (Apache-2.0)
 ├── scripts/           # Data download scripts
-├── start.py           # One-click startup
-└── docker/            # Docker configurations
+└── start.py           # One-click startup
 ```
 
 ## Contributing

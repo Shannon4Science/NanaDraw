@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+*.whl
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+frontend/dist/
+.pnpm-store/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Environment
+.env
+.env.*
+
+# Data (downloaded separately)
+backend/static/gallery/*.png
+backend/static/gallery/*.jpg
+backend/static/bioicons/svgs/
+backend/static/bioicons/libs/
+
+# User data
+~/.nanadraw/
+
+# rembg model
+~/.u2net/
+
+# Build artifacts
+*.egg-info
+build/

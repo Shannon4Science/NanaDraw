@@ -1,0 +1,16 @@
+# draw.io fork — only track source code, not build artifacts or Java deps
+bin/
+build/
+classes/
+node_modules/
+.vscode/
+
+# Java WAR dependencies (not needed for frontend-only usage)
+src/main/webapp/WEB-INF/lib/*.jar
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large ChangeLog (can be regenerated from git history)
+ChangeLog

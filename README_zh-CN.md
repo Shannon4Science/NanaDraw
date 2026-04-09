@@ -58,7 +58,7 @@
 
 - 适合既要美观，又要求严谨、可控的正式作图场景。
 - 系统会先理解描述里的结构关系，再按步骤组装模块、组件和版式。
-- 这一模式更强调“按描述准确生成”，同时保证模块边界清晰、结构规整、后续易于编辑。
+- 这一模式更强调"按描述准确生成"，同时保证模块边界清晰、结构规整、后续易于编辑。
 - 它兼顾创意表达，以及论文图、架构图、多阶段流程图对清晰度和规范性的要求。
 - 如果说生成模式更像灵感爆发，组装模式就更像把创意打磨成可展示、可发表的正式作品。
 
@@ -69,14 +69,14 @@
 - 它像一个随手可用的创意零件库，让你不用每次都从零开始画。
 - 你可以逐步沉淀自己的常用图标、组件和视觉元素，越用越顺手。
 - 通过 AI 素材生成，只需一句描述或一个参考方向，就能生成新的图标、插图和可复用视觉组件。
-- 当通用图标不够用、现成素材又不够贴切时，素材工坊可以把“我想要什么”快速变成“我现在就能用什么”。
+- 当通用图标不够用、现成素材又不够贴切时，素材工坊可以把"我想要什么"快速变成"我现在就能用什么"。
 
 ### 素材库与图标
 
 - **Gallery**：下载风格参考图：`python scripts/download_gallery.py`
 - **Bioicons**：下载 SVG 图标：`python scripts/download_bioicons.py`
 
-这两部分都是可选资源。Docker 镜像已预装全部数据。
+这两部分都是可选资源，首次启动时会提示下载。
 
 ## 安装与部署
 
@@ -90,8 +90,8 @@
 ### 一键启动
 
 ```bash
-git clone https://github.com/opennanadraw/opennanadraw.git
-cd opennanadraw
+git clone https://github.com/Shannon4Science/NanaDraw.git
+cd NanaDraw
 python start.py
 ```
 
@@ -101,6 +101,20 @@ python start.py
 3. 构建前端
 4. 启动服务并打开浏览器
 
+### 后台运行
+
+如需将 NanaDraw 以后台进程方式运行：
+
+```bash
+nohup python start.py > nanadraw.log 2>&1 &
+```
+
+随时查看日志：`tail -f nanadraw.log`。停止进程：
+
+```bash
+kill $(cat nanadraw.pid 2>/dev/null || ps aux | grep 'start.py' | grep -v grep | awk '{print $2}')
+```
+
 ### 开发模式
 
 ```bash
@@ -109,32 +123,21 @@ python start.py --dev
 
 该模式会同时启动 Vite 开发服务器和后端 API 服务。
 
-### Docker
-
-```bash
-# Standard
-docker build -f docker/Dockerfile -t nanadraw .
-docker run -p 8001:8001 nanadraw
-
-# China mirror (faster for CN users)
-docker build -f docker/Dockerfile.cn -t nanadraw .
-docker run -p 8001:8001 nanadraw
-```
-
 ### 配置说明
 
 启动后，点击右上角的 ⚙️ 设置按钮即可配置：
 
 - **API Key**：你的 LLM 服务商 API Key
 - **API Base URL**：自定义接口地址（留空则使用默认值）
-- **Text Model**：默认 `gemini-2.5-pro-preview-06-05`
-- **Image Model**：默认 `gemini-2.0-flash-preview-image-generation`
+- **文本模型**：默认 `gemini-3.1-pro-preview`
+- **图像模型**：默认 `gemini-3-pro-image-preview`
+- **组件模型**：默认 `gemini-3.1-flash-image-preview`
 - **NanaSoul**：用于风格约束的自定义 AI 角色
 
 ## 架构概览
 
 ```
-nanadraw/
+NanaDraw/
 ├── frontend/          # React + TypeScript + Vite + TailwindCSS
 │   └── src/
 ├── backend/           # FastAPI + Python
@@ -146,8 +149,7 @@ nanadraw/
 │   └── requirements.txt
 ├── drawio/            # draw.io fork (Apache-2.0)
 ├── scripts/           # Data download scripts
-├── start.py           # One-click startup
-└── docker/            # Docker configurations
+└── start.py           # One-click startup
 ```
 
 ## 贡献
