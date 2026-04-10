@@ -163,6 +163,7 @@ const zh = {
   "settings.baseUrl": "Base URL 地址",
   "settings.baseUrlHint": "使用兼容 OpenAI API 格式的 Base URL，格式：http(s)://{host}/v1",
   "settings.apiKeyConfigured": "已配置",
+  "settings.apiKeyPlaceholder": "输入新 Key 即可替换",
   "settings.textModel": "文本模型",
   "settings.imageModel": "生图模型",
   "settings.componentModel": "组件模型",

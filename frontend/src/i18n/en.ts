@@ -165,6 +165,7 @@ const en: Record<TranslationKey, string> = {
   "settings.baseUrl": "API Base URL",
   "settings.baseUrlHint": "OpenAI-compatible Base URL, format: http(s)://{host}/v1",
   "settings.apiKeyConfigured": "Configured",
+  "settings.apiKeyPlaceholder": "Enter new key to replace",
   "settings.textModel": "Text Model",
   "settings.imageModel": "Image Model",
   "settings.componentModel": "Component Model",

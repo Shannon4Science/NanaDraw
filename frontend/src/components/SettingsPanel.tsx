@@ -187,14 +187,21 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           ) : tab === "api" ? (
             <div className="space-y-4">
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-stone-600">{t("settings.apiKey")}</span>
+                <span className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-stone-600">
+                  {t("settings.apiKey")}
+                  {isKeyConfigured && (
+                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-emerald-200/60">
+                      ✓ {t("settings.apiKeyConfigured")}
+                    </span>
+                  )}
+                </span>
                 <input
-                  type="password"
+                  type="text"
                   autoComplete="off"
                   value={llmApiKey}
                   onChange={(e) => setLlmApiKey(e.target.value)}
                   className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
-                  placeholder={isKeyConfigured ? "••••••••" : ""}
+                  placeholder={isKeyConfigured ? t("settings.apiKeyPlaceholder") : ""}
                 />
               </label>
               <label className="block">
