@@ -106,7 +106,14 @@ python start.py
 > **注意**：首次使用请先在前台运行 `python start.py`，以完成依赖安装、素材下载等交互式步骤。初始化完成后，后续启动可使用后台模式：
 
 ```bash
-nohup python start.py > nanadraw.log 2>&1 &
+nohup python start.py --skip-download > nanadraw.log 2>&1 &
+```
+
+`--skip-download` 会跳过交互式的数据下载提示，避免后台进程因等待输入而挂起。如需补充下载素材，请在前台单独运行：
+
+```bash
+python scripts/download_gallery.py
+python scripts/download_bioicons.py
 ```
 
 随时查看日志：`tail -f nanadraw.log`。停止进程：
@@ -133,6 +140,22 @@ python start.py --dev
 - **图像模型**：默认 `gemini-3-pro-image-preview`
 - **组件模型**：默认 `gemini-3.1-flash-image-preview`
 - **NanaSoul**：用于风格约束的自定义 AI 角色
+
+#### 数据目录（环境变量）
+
+NanaDraw 会将项目、素材和设置保存到本地数据目录。默认路径是 `~/.nanadraw`，可通过环境变量 `NANADRAW_DATA_DIR` 自定义：
+
+```bash
+# macOS / Linux
+export NANADRAW_DATA_DIR="$HOME/nanadraw-data"
+python start.py
+```
+
+```powershell
+# Windows PowerShell
+$env:NANADRAW_DATA_DIR="$HOME\\nanadraw-data"
+python start.py
+```
 
 ## 架构概览
 

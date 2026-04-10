@@ -106,7 +106,14 @@ The script will:
 > **Note**: For first-time use, run `python start.py` in the foreground to complete interactive steps such as dependency installation and asset downloads. Once initialization is done, subsequent launches can use background mode:
 
 ```bash
-nohup python start.py > nanadraw.log 2>&1 &
+nohup python start.py --skip-download > nanadraw.log 2>&1 &
+```
+
+`--skip-download` skips the interactive data download prompts, preventing the background process from hanging on user input. To download assets separately, run in the foreground:
+
+```bash
+python scripts/download_gallery.py
+python scripts/download_bioicons.py
 ```
 
 View the log at any time with `tail -f nanadraw.log`. To stop the process, find the PID and kill it:
@@ -133,6 +140,22 @@ After starting, click the ⚙️ gear icon in the top-right corner to configure:
 - **Image Model**: Default `gemini-3-pro-image-preview`
 - **Component Model**: Default `gemini-3.1-flash-image-preview`
 - **NanaSoul**: Custom AI persona for style constraints
+
+#### Data Directory (Environment Variable)
+
+NanaDraw stores projects, assets, and settings in a local data directory. The default path is `~/.nanadraw`, and you can override it with `NANADRAW_DATA_DIR`:
+
+```bash
+# macOS / Linux
+export NANADRAW_DATA_DIR="$HOME/nanadraw-data"
+python start.py
+```
+
+```powershell
+# Windows PowerShell
+$env:NANADRAW_DATA_DIR="$HOME\\nanadraw-data"
+python start.py
+```
 
 ## Architecture
 

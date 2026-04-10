@@ -203,6 +203,8 @@ def main():
     parser.add_argument("--port", type=int, default=8001, help="Server port")
     parser.add_argument("--build", action="store_true", help="Force rebuild frontend")
     parser.add_argument("--skip-deps", action="store_true", help="Skip dependency install")
+    parser.add_argument("--skip-download", action="store_true",
+                        help="Skip interactive data download prompts (gallery, bioicons, rembg)")
     args = parser.parse_args()
 
     print(t("🎨 NanaDraw — 学术论文 Pipeline 图生成工具",
@@ -216,7 +218,11 @@ def main():
     if not args.skip_deps:
         install_deps()
     
-    check_data()
+    if not args.skip_download:
+        check_data()
+    else:
+        print(t("⏭ 跳过数据下载（使用 --skip-download）",
+                "⏭ Skipping data download (--skip-download)"))
 
     if args.build:
         # Force rebuild
