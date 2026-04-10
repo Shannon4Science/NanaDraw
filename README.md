@@ -26,6 +26,16 @@ Demo Video: [Add video link here](#)
 - 💾 Local project storage — no cloud required
 - 🌐 Bilingual UI (Chinese/English)
 
+### Example Scenario
+
+Upload a hand-drawn sketch and turn it into a high-fidelity editable pipeline diagram in one click.
+
+| Input Sketch | Editable Output |
+|--------------|-----------------|
+| <img src="image/handwrite.jpg" alt="Hand-drawn sketch example" width="420"> | <img src="image/pipeline.png" alt="Editable pipeline diagram example" width="420"> |
+
+Figure 1 shows the rough hand-drawn sketch. Figure 2 shows the generated high-fidelity editable workflow diagram.
+
 ### Creation Modes
 
 | Mode | Description | Steps | Example Screenshot |
