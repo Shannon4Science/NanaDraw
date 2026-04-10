@@ -40,9 +40,23 @@ Figure 1 shows the rough hand-drawn sketch. Figure 2 shows the generated high-fi
 
 | Mode | Description | Steps | Example Screenshot |
 |------|-------------|-------|--------------------|
-| Draft Mode | Editable XML sketch from text or hand-drawn input | 2 (Plan → XML) | <img src="image/draft_mode.jpg" alt="Draft Mode screenshot" width="220"> |
-| Generation Mode | Direct visual concept image for inspiration and preview | 2 (Plan → Image) | <img src="image/generation_mode.jpg" alt="Generation Mode screenshot" width="220"> |
-| Assembly Mode | Editable, style-aware illustration built through structured assembly | 5 (Plan → Image → Blueprint → Components → Assembly) | <img src="image/assembly_mode.jpg" alt="Assembly Mode screenshot" width="220"> |
+| Draft Mode | Editable XML sketch from text or hand-drawn input | 2 (Plan → XML) | [View screenshot](./image/draft_mode.jpg) |
+| Generation Mode | Direct visual concept image for inspiration and preview | 2 (Plan → Image) | [View screenshot](./image/generation_mode.jpg) |
+| Assembly Mode | Editable, style-aware illustration built through structured assembly | 5 (Plan → Image → Blueprint → Components → Assembly) | [View screenshot](./image/assembly_mode.jpg) |
+
+### Mode Gallery
+
+**Draft Mode**
+
+<img src="image/draft_mode.jpg" alt="Draft Mode screenshot" width="760">
+
+**Generation Mode**
+
+<img src="image/generation_mode.jpg" alt="Generation Mode screenshot" width="760">
+
+**Assembly Mode**
+
+<img src="image/assembly_mode.jpg" alt="Assembly Mode screenshot" width="760">
 
 ### Draft Mode
 
