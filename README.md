@@ -8,7 +8,7 @@
 
 [简体中文](./README_zh-CN.md) | English
 
-Demo Video: [Add video link here](#)
+[Product Introduce](https://www.youtube.com/watch?v=_awu_jQiSFQ)
 
 <!-- TODO: Add demo GIF here -->
 <!-- ![Demo](docs/demo.gif) -->
