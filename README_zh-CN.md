@@ -8,10 +8,7 @@
 
 简体中文 | [English](./README.md)
 
-演示视频：[待补充链接](#)
-
-<!-- TODO: Add demo GIF here -->
-<!-- ![Demo](docs/demo.gif) -->
+[演示视频](https://www.youtube.com/watch?v=_awu_jQiSFQ)
 
 </div>
 
