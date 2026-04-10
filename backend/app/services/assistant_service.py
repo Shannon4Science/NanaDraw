@@ -863,7 +863,7 @@ class AssistantService:
         ref_image_b64 = regen_ctx.get("component_image_b64") or None
         en = self._locale == "en"
 
-        num_variants = 2
+        num_variants = 3
 
         pre_msg = (
             f"Got it~ 🎨 Regenerating component **{label}** using the component model, "
@@ -904,28 +904,41 @@ class AssistantService:
 
         images: list[dict[str, str]] = []
         try:
-            for i in range(num_variants):
+            import asyncio
+
+            async def _regen_one(variant_idx: int) -> tuple[int, str | None, str | None]:
+                regen_llm = LLMService()
+                regen_llm.log_tag = f"[regen-v{variant_idx} user={self.username}] "
+                regen_llm.image_model = llm.image_model
                 try:
-                    image_b64 = await llm.generate_image(
+                    img = await regen_llm.generate_image(
                         self.REGEN_SYSTEM,
                         user_prompt,
-                        temperature=0.8 + i * 0.1,
+                        temperature=0.8 + variant_idx * 0.1,
                         reference_image_b64=ref_image_b64,
                     )
                     try:
-                        image_b64 = await ImageProcessor.ensure_transparent(
-                            image_b64,
-                            prefer_edge_flood=True,
+                        img = await ImageProcessor.ensure_transparent(
+                            img, prefer_edge_flood=True,
                         )
                     except Exception:
                         pass
-                    images.append({"description": label, "image_b64": image_b64})
-                    yield _sse("regen_progress", {
-                        "completed": i + 1,
-                        "total": num_variants,
-                    })
+                    return (variant_idx, img, None)
                 except Exception as e:
-                    logger.warning("Regen variant %d failed for %r: %s", i + 1, label, e)
+                    logger.warning("Regen variant %d failed for %r: %s", variant_idx + 1, label, e)
+                    return (variant_idx, None, str(e))
+                finally:
+                    await regen_llm.close()
+
+            results = await asyncio.gather(*[_regen_one(i) for i in range(num_variants)])
+
+            for idx, img_b64, _err in sorted(results, key=lambda r: r[0]):
+                if img_b64:
+                    images.append({"description": label, "image_b64": img_b64})
+                yield _sse("regen_progress", {
+                    "completed": idx + 1,
+                    "total": num_variants,
+                })
 
             if images:
                 yield _sse("regen_results", {
