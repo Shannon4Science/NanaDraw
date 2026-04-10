@@ -103,7 +103,7 @@ python start.py
 
 ### 后台运行
 
-如需将 NanaDraw 以后台进程方式运行：
+> **注意**：首次使用请先在前台运行 `python start.py`，以完成依赖安装、素材下载等交互式步骤。初始化完成后，后续启动可使用后台模式：
 
 ```bash
 nohup python start.py > nanadraw.log 2>&1 &

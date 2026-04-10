@@ -103,7 +103,7 @@ The script will:
 
 ### Background Running
 
-To run NanaDraw as a background process:
+> **Note**: For first-time use, run `python start.py` in the foreground to complete interactive steps such as dependency installation and asset downloads. Once initialization is done, subsequent launches can use background mode:
 
 ```bash
 nohup python start.py > nanadraw.log 2>&1 &
