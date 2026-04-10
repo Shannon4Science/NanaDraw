@@ -10,8 +10,6 @@
 
 [Video](https://www.youtube.com/watch?v=_awu_jQiSFQ)
 
-<!-- TODO: Add demo GIF here -->
-<!-- ![Demo](docs/demo.gif) -->
 
 </div>
 
