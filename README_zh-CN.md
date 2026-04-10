@@ -40,9 +40,23 @@
 
 | 模式 | 说明 | 步骤 | 示例截图 |
 |------|------|------|----------|
-| 草稿模式 | 根据文字或手绘输入生成可编辑 XML 草图 | 2（Plan → XML） | <img src="image/draft_mode.jpg" alt="草稿模式示例截图" width="220"> |
-| 生成模式 | 直接生成完整视觉概念图，用于灵感探索和预览 | 2（Plan → Image） | <img src="image/generation_mode.jpg" alt="生成模式示例截图" width="220"> |
-| 组装模式 | 通过结构化组装流程生成可编辑、带风格控制的视觉插图 | 5（Plan → Image → Blueprint → Components → Assembly） | <img src="image/assembly_mode.jpg" alt="组装模式示例截图" width="220"> |
+| 草稿模式 | 根据文字或手绘输入生成可编辑 XML 草图 | 2（Plan → XML） | [查看截图](./image/draft_mode.jpg) |
+| 生成模式 | 直接生成完整视觉概念图，用于灵感探索和预览 | 2（Plan → Image） | [查看截图](./image/generation_mode.jpg) |
+| 组装模式 | 通过结构化组装流程生成可编辑、带风格控制的视觉插图 | 5（Plan → Image → Blueprint → Components → Assembly） | [查看截图](./image/assembly_mode.jpg) |
+
+### 模式预览
+
+**草稿模式**
+
+<img src="image/draft_mode.jpg" alt="草稿模式示例截图" width="760">
+
+**生成模式**
+
+<img src="image/generation_mode.jpg" alt="生成模式示例截图" width="760">
+
+**组装模式**
+
+<img src="image/assembly_mode.jpg" alt="组装模式示例截图" width="760">
 
 ### 草稿模式
 
