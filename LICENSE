@@ -1,26 +1,3 @@
-开源许可协议
-
-NanaDraw 基于 Apache License 2.0 的修改版本进行许可，并附加以下条件：
-
-NanaDraw 可以用于商业用途。但如果满足以下任一条件，则必须从 NanaDraw 的开发者处获得商业许可：
-
-a. 商业规模门槛：
-   月活跃用户数（MAU）超过 1 亿；或
-   月收入超过 2000 万美元。
-   上述门槛按照你及你的关联公司合并口径计算。
-
-b. 在线服务标识要求：
-   如果你基于 NanaDraw 向第三方提供在线服务，你应当在相关产品或服务的显著位置清晰标明其使用了 NanaDraw。
-
-如违反上述任何条件，本许可将自动终止。
-
-除上述特别条件外，其他权利与限制均遵循 Apache License 2.0。
-
-本项目包含的 draw.io 组件遵循其原始的 Apache License 2.0 许可，详见 drawio/LICENSE。
-
-© 2024-2026 NanaDraw Contributors
-
-
 Open Source License
 
 NanaDraw is licensed under a modified version of the Apache License 2.0, with the following additional conditions:
@@ -41,4 +18,4 @@ Except for the specific conditions set out above, all other rights and restricti
 
 The draw.io components included in this project are licensed under their original Apache License 2.0. See drawio/LICENSE for details.
 
-© 2024-2026 NanaDraw Contributors
+© 2026 NanaDraw Contributors

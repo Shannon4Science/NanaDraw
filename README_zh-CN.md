@@ -204,7 +204,7 @@ NanaDraw/
 
 ## 许可证
 
-本项目基于 Apache License 2.0 修改版本进行许可，并附加额外条件。详见 [LICENSE](./LICENSE)。
+本项目基于 Apache License 2.0 修改版本进行许可，并附加额外条件。详见 [LICENSE](./LICENSE_zh-CN)。（[English](./LICENSE)）
 
 draw.io fork 部分遵循 Apache-2.0 许可证。
 
