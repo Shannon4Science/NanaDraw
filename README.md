@@ -205,9 +205,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines.
 
 ## License
 
-<!-- TODO: Choose and add license -->
-
-This project is licensed under [LICENSE_NAME] - see the [LICENSE](./LICENSE) file for details.
+This project is licensed under a modified Apache License 2.0 with additional conditions. See the [LICENSE](./LICENSE) file for details.
 
 The draw.io fork is licensed under Apache-2.0.
 
