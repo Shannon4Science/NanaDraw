@@ -10,7 +10,7 @@
 
 [演示视频](https://www.youtube.com/watch?v=_awu_jQiSFQ)
 
-👋 join us on [WeChat](./docs/material/wechat_group_qr.jpg)
+👋 在 [微信群](./docs/material/wechat_group_qr.jpg) 加入我们！
 
 </div>
 
