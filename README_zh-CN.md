@@ -10,6 +10,8 @@
 
 [演示视频](https://www.youtube.com/watch?v=_awu_jQiSFQ)
 
+👋 在 [微信群](./docs/material/wechat_group_qr.jpg) 加入我们！
+
 </div>
 
 ## 功能特性
