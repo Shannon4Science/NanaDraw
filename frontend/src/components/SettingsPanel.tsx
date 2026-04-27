@@ -134,7 +134,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     } finally {
       setSaving(false);
     }
-  }, [tab, llmApiKey, isKeyConfigured, llmBaseUrl, llmModel, llmImageModel, llmComponentModel, mineruApiToken, isMineruConfigured, nanaSoul, t]);
+  }, [tab, llmApiKey, isKeyConfigured, llmBaseUrl, llmModel, llmImageModel, llmComponentModel, mineruApiToken, isMineruConfigured, nanaSoul, onClose, t]);
 
   if (!open) return null;
 

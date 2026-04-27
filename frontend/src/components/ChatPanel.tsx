@@ -40,6 +40,7 @@ import type {
   StyleReference,
 } from "../types/paper";
 import { GalleryModal } from "./GalleryModal";
+import { ACCEPTED_UPLOAD_TYPES, classifyUploadFile } from "./chatUpload";
 
 // ── Constants ──
 
@@ -466,15 +467,17 @@ export function ChatPanel({
     reader.readAsDataURL(file);
   }, []);
 
-  const readDocFile = useCallback(async (file: File) => {
+  const handleUploadFile = useCallback(async (file: File) => {
     if (pdfParse?.status === "parsing") return;
 
-    const ext = file.name.split(".").pop()?.toLowerCase();
-    const isPdf = ext === "pdf" || file.type === "application/pdf";
-    const isMd = ext === "md" || ext === "markdown" || file.type === "text/markdown";
-    const isTxt = ext === "txt" || file.type === "text/plain";
+    const fileKind = classifyUploadFile(file);
 
-    if (isPdf) {
+    if (fileKind === "image") {
+      readFileAsB64(file);
+      return;
+    }
+
+    if (fileKind === "pdf") {
       if (file.size > MAX_PDF_SIZE_BYTES) {
         setAttachedFile(null);
         setPdfParse({ status: "error", fileName: file.name, error: t("chat.pdfTooLarge") });
@@ -493,24 +496,26 @@ export function ChatPanel({
           error: err instanceof Error ? err.message : t("chat.pdfParseFailed"),
         });
       }
-    } else if (isMd || isTxt) {
+    } else if (fileKind === "markdown" || fileKind === "text") {
       setPdfParse(null);
       const reader = new FileReader();
       reader.onload = () => {
         const text = reader.result as string;
-        setAttachedFile({ name: file.name, type: isMd ? "markdown" : "text", content: text });
+        setAttachedFile({ name: file.name, type: fileKind, content: text });
       };
       reader.readAsText(file);
+    } else {
+      setPdfParse({ status: "error", fileName: file.name, error: t("chat.unsupportedUploadFile") });
     }
-  }, [pdfParse, t]);
+  }, [pdfParse, readFileAsB64, t]);
 
-  const handleDocFileChange = useCallback(
+  const handleUploadFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) readDocFile(file);
+      if (file) handleUploadFile(file);
       e.target.value = "";
     },
-    [readDocFile],
+    [handleUploadFile],
   );
 
   const handlePaste = useCallback(
@@ -525,15 +530,6 @@ export function ChatPanel({
           return;
         }
       }
-    },
-    [readFileAsB64],
-  );
-
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) readFileAsB64(file);
-      e.target.value = "";
     },
     [readFileAsB64],
   );
@@ -851,16 +847,10 @@ export function ChatPanel({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept={ACCEPTED_UPLOAD_TYPES}
             className="hidden"
-            onChange={handleFileChange}
-          />
-          <input
-            type="file"
-            accept=".pdf,application/pdf,.md,.txt,.markdown,text/plain,text/markdown"
-            className="hidden"
-            id="doc-file-input"
-            onChange={handleDocFileChange}
+            data-testid="upload-attachment-input"
+            onChange={handleUploadFileChange}
           />
 
           {/* Attached file preview */}
@@ -888,33 +878,19 @@ export function ChatPanel({
 
           {/* Action bar */}
           <div className="flex items-end gap-1.5 border-t border-gray-50 px-2 py-1.5">
-            {/* Attach sketch */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={isActive}
-              className={clsx(
-                "mb-0.5 shrink-0 rounded-full border p-1 transition-all",
-                sketchImage
-                  ? "border-primary/30 bg-primary-container/30 text-primary"
-                  : "border-outline-variant/10 text-outline hover:border-outline-variant/20 hover:text-on-surface-variant",
-              )}
-              title={t("chat.uploadSketch")}
-            >
-              <Paperclip className="h-3.5 w-3.5" />
-            </button>
-
-            <button
-              onClick={() => document.getElementById("doc-file-input")?.click()}
               disabled={isActive || isPdfParsing}
               className={clsx(
                 "mb-0.5 shrink-0 rounded-full border p-1 transition-all",
-                attachedFile || pdfParse
+                sketchImage || attachedFile || pdfParse
                   ? "border-primary/30 bg-primary-container/30 text-primary"
                   : "border-outline-variant/10 text-outline hover:border-outline-variant/20 hover:text-on-surface-variant",
               )}
-              title={t("chat.uploadFile")}
+              title={t("chat.uploadAttachment")}
+              data-testid="upload-attachment-button"
             >
-              <FileUp className="h-3.5 w-3.5" />
+              <Paperclip className="h-3.5 w-3.5" />
             </button>
 
             {/* Mode */}

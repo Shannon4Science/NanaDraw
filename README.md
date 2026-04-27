@@ -18,7 +18,7 @@
 ## Features
 
 - 📝 Paste method description text → auto-generate pipeline diagrams
-- 📄 Upload paper PDFs, parse them with MinerU, and quote selected text for drawing prompts
+- 📎 Use one upload entry for images, PDFs, and text files; images become sketch references, while PDFs are parsed with MinerU for quoted-selection prompts
 - 🎨 Three creation modes: Draft, Generation, and Assembly
 - 🖼️ Built-in style gallery with 250+ academic paper reference images
 - 🧰 Asset workshop with Bioicons, reusable personal assets, and AI-generated materials
@@ -39,11 +39,12 @@ Figure 1 shows the rough hand-drawn sketch. Figure 2 shows the generated high-fi
 
 ### PDF Parsing and Quoted-Selection Drawing
 
-Upload a PDF in the AI Workbench and NanaDraw will call the MinerU online API to parse the document into Markdown. The parsed result appears in a scrollable, collapsible floating panel on the left side of the workbench. You can select a method paragraph, experiment flow, or paper-structure passage, click "Quote selection", enrich the prompt in your own words, and then continue through NanaDraw's existing generation flow.
+The AI Workbench provides one upload entry for images, PDFs, Markdown, and text files. NanaDraw routes each file by type: images become sketch references, PDFs are parsed into Markdown through the MinerU online API, and Markdown/Text files are attached as prompt reference material.
 
-- PDF upload is available in Draft, Generation, Assembly, and Auto modes.
+- File upload is available in Draft, Generation, Assembly, and Auto modes.
+- Parsed PDFs appear in a scrollable, collapsible floating panel on the left side of the workbench.
 - PDF content is sent only to MinerU for document parsing; NanaDraw does not automatically send the whole paper to the LLM.
-- Only the text explicitly quoted by the user is merged into the generation prompt.
+- Only the text explicitly quoted by the user is merged into the generation prompt; users can enrich the prompt before generating.
 
 ### Creation Modes
 
