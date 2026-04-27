@@ -11,7 +11,7 @@ const DEFAULT_IMAGE_MODEL = "gemini-3-pro-image-preview";
 const DEFAULT_COMPONENT_MODEL = "gemini-3.1-flash-image-preview";
 const NANA_SOUL_MAX = 500;
 
-type TabId = "api" | "nana";
+type TabId = "api" | "documents" | "nana";
 
 export interface SettingsPanelProps {
   open: boolean;
@@ -32,6 +32,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [llmModel, setLlmModel] = useState(DEFAULT_TEXT_MODEL);
   const [llmImageModel, setLlmImageModel] = useState(DEFAULT_IMAGE_MODEL);
   const [llmComponentModel, setLlmComponentModel] = useState(DEFAULT_COMPONENT_MODEL);
+  const [mineruApiToken, setMineruApiToken] = useState("");
+  const [isMineruConfigured, setIsMineruConfigured] = useState(false);
   const [nanaSoul, setNanaSoul] = useState("");
 
   useEffect(() => {
@@ -49,6 +51,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         setLlmModel(data.llm_model || DEFAULT_TEXT_MODEL);
         setLlmImageModel(data.llm_image_model || DEFAULT_IMAGE_MODEL);
         setLlmComponentModel(data.llm_component_model || DEFAULT_COMPONENT_MODEL);
+        setMineruApiToken("");
+        setIsMineruConfigured(data.mineru_is_configured);
         setNanaSoul(data.nana_soul || "");
       })
       .catch(() => {
@@ -59,6 +63,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           setLlmModel(DEFAULT_TEXT_MODEL);
           setLlmImageModel(DEFAULT_IMAGE_MODEL);
           setLlmComponentModel(DEFAULT_COMPONENT_MODEL);
+          setMineruApiToken("");
+          setIsMineruConfigured(false);
           setNanaSoul("");
           setToast({ type: "error", text: t("settings.loadFailed") });
         }
@@ -90,8 +96,13 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
 
   const handleSave = useCallback(async () => {
     const hasNewKey = llmApiKey.trim().length > 0;
-    if (!hasNewKey && !isKeyConfigured) {
+    const hasNewMineruToken = mineruApiToken.trim().length > 0;
+    if (tab === "api" && !hasNewKey && !isKeyConfigured) {
       setToast({ type: "error", text: t("settings.notConfigured") });
+      return;
+    }
+    if (tab === "documents" && !hasNewMineruToken && !isMineruConfigured) {
+      setToast({ type: "error", text: t("settings.mineruNotConfigured") });
       return;
     }
     setSaving(true);
@@ -107,9 +118,15 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       if (hasNewKey) {
         payload.llm_api_key = llmApiKey.trim();
       }
-      await updateSettings(payload as Partial<Omit<Settings, "is_configured">>);
+      if (hasNewMineruToken) {
+        payload.mineru_api_token = mineruApiToken.trim();
+      }
+      await updateSettings(payload as Partial<Omit<Settings, "is_configured" | "mineru_is_configured">>);
       if (hasNewKey) {
         setIsKeyConfigured(true);
+      }
+      if (hasNewMineruToken) {
+        setIsMineruConfigured(true);
       }
       onClose();
     } catch {
@@ -117,7 +134,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     } finally {
       setSaving(false);
     }
-  }, [llmApiKey, isKeyConfigured, llmBaseUrl, llmModel, llmImageModel, llmComponentModel, nanaSoul, t]);
+  }, [tab, llmApiKey, isKeyConfigured, llmBaseUrl, llmModel, llmImageModel, llmComponentModel, mineruApiToken, isMineruConfigured, nanaSoul, t]);
 
   if (!open) return null;
 
@@ -163,6 +180,18 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             )}
           >
             {t("settings.apiConfig")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("documents")}
+            className={clsx(
+              "flex-1 rounded-t-lg px-3 py-2.5 text-sm font-semibold transition-colors",
+              tab === "documents"
+                ? "bg-white text-amber-700 shadow-[0_-1px_0_0_white]"
+                : "text-stone-500 hover:text-stone-700",
+            )}
+          >
+            {t("settings.documents")}
           </button>
           <button
             type="button"
@@ -243,6 +272,28 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   onChange={(e) => setLlmComponentModel(e.target.value)}
                   placeholder={DEFAULT_COMPONENT_MODEL}
                   className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                />
+              </label>
+            </div>
+          ) : tab === "documents" ? (
+            <div className="space-y-4">
+              <p className="text-xs leading-relaxed text-stone-500">{t("settings.mineruTokenHelper")}</p>
+              <label className="block">
+                <span className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-stone-600">
+                  {t("settings.mineruToken")}
+                  {isMineruConfigured && (
+                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-emerald-200/60">
+                      ✓ {t("settings.apiKeyConfigured")}
+                    </span>
+                  )}
+                </span>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  value={mineruApiToken}
+                  onChange={(e) => setMineruApiToken(e.target.value)}
+                  className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                  placeholder={isMineruConfigured ? t("settings.apiKeyPlaceholder") : ""}
                 />
               </label>
             </div>

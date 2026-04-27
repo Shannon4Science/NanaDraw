@@ -247,6 +247,30 @@ export async function fetchAssistantStatus(): Promise<{ enabled: boolean }> {
   }
 }
 
+// ── Document Parsing API ──
+
+export interface ParsedPdfResult {
+  file_name: string;
+  markdown: string;
+  batch_id: string;
+  data_id: string;
+  source: "mineru";
+}
+
+export async function parsePdfDocument(file: File): Promise<ParsedPdfResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/documents/parse-pdf`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: t("svc.pdfParseFailed") }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 
 
 // ── Pipeline SSE ──
@@ -670,4 +694,3 @@ export async function assistantChat(
     }
   }
 }
-

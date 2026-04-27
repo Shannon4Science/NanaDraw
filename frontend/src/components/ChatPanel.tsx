@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import ReactMarkdown from "react-markdown";
+import { parsePdfDocument, type ParsedPdfResult } from "../services/api";
 import { extractImages, stripComponentDescriptions } from "../services/projectApi";
 import { ASSISTANT_AVATAR_URL } from "../lib/avatarUrl";
 import { useT } from "../contexts/LanguageContext";
@@ -65,6 +66,12 @@ const MODE_ICONS: Record<AssistantMode, typeof Wand2> = {
 };
 
 const DRAWIO_MODES: AssistantMode[] = ["auto", "fast", "image_only", "full_gen"];
+const MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024;
+
+type PdfParseState =
+  | { status: "parsing"; fileName: string }
+  | { status: "done"; result: ParsedPdfResult; selectedText: string }
+  | { status: "error"; fileName: string; error: string };
 
 // ── Props ──
 
@@ -180,7 +187,10 @@ export function ChatPanel({
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pdfTextRef = useRef<HTMLPreElement>(null);
   const [attachedFile, setAttachedFile] = useState<{ name: string; type: string; content: string } | null>(null);
+  const [pdfParse, setPdfParse] = useState<PdfParseState | null>(null);
+  const [pdfPanelCollapsed, setPdfPanelCollapsed] = useState(false);
   const bridgedXmlRef = useRef<string | null>(null);
   const bridgedImageRef = useRef<string | null>(null);
   // Bridge assistant state to DrawPage (dedup via refs to prevent
@@ -365,7 +375,15 @@ export function ChatPanel({
 
     if (!trimmed && !attachedFile) return;
 
-    const text = trimmed || (attachedFile ? t("chat.genFromAttachedFile", { name: attachedFile.name }) : "");
+    const text = attachedFile
+      ? [
+          t("chat.referenceMaterial", { name: attachedFile.name }),
+          attachedFile.content,
+          trimmed
+            ? t("chat.userPromptWithReference", { prompt: trimmed })
+            : t("chat.genFromAttachedFile", { name: attachedFile.name }),
+        ].join("\n\n")
+      : trimmed;
 
     const sketch = sketchImage;
     setInput("");
@@ -398,6 +416,34 @@ export function ChatPanel({
     sendMessage(text, opts);
   }, [input, isLoading, isGenerating, mode, sendMessage, sketchImage, selectedStyleId, textModel, imageModel, componentGenModel, attachedFile, editorRef, canvasRegenRequest, activeRegenContext, t]);
 
+  const handlePdfTextSelection = useCallback(() => {
+    const selection = window.getSelection();
+    const container = pdfTextRef.current;
+    if (!selection || !container || !selection.anchorNode || !selection.focusNode) return;
+    if (!container.contains(selection.anchorNode) || !container.contains(selection.focusNode)) return;
+    const selected = selection.toString().trim();
+    if (!selected) return;
+    setPdfParse((prev) => (
+      prev?.status === "done"
+        ? { ...prev, selectedText: selected }
+        : prev
+    ));
+  }, []);
+
+  const handleUsePdfSelection = useCallback(() => {
+    if (isLoading || isGenerating || pdfParse?.status !== "done") return;
+    const selected = pdfParse.selectedText.trim();
+    if (!selected) return;
+
+    setAttachedFile({
+      name: pdfParse.result.file_name,
+      type: "pdf-selection",
+      content: selected,
+    });
+    setPdfPanelCollapsed(true);
+    textareaRef.current?.focus();
+  }, [isLoading, isGenerating, pdfParse]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -420,21 +466,35 @@ export function ChatPanel({
     reader.readAsDataURL(file);
   }, []);
 
-  const readDocFile = useCallback((file: File) => {
+  const readDocFile = useCallback(async (file: File) => {
+    if (pdfParse?.status === "parsing") return;
+
     const ext = file.name.split(".").pop()?.toLowerCase();
     const isPdf = ext === "pdf" || file.type === "application/pdf";
     const isMd = ext === "md" || ext === "markdown" || file.type === "text/markdown";
     const isTxt = ext === "txt" || file.type === "text/plain";
 
     if (isPdf) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        const b64 = dataUrl.split(",")[1];
-        if (b64) setAttachedFile({ name: file.name, type: "pdf", content: b64 });
-      };
-      reader.readAsDataURL(file);
+      if (file.size > MAX_PDF_SIZE_BYTES) {
+        setAttachedFile(null);
+        setPdfParse({ status: "error", fileName: file.name, error: t("chat.pdfTooLarge") });
+        return;
+      }
+      setAttachedFile(null);
+      setPdfPanelCollapsed(false);
+      setPdfParse({ status: "parsing", fileName: file.name });
+      try {
+        const result = await parsePdfDocument(file);
+        setPdfParse({ status: "done", result, selectedText: "" });
+      } catch (err) {
+        setPdfParse({
+          status: "error",
+          fileName: file.name,
+          error: err instanceof Error ? err.message : t("chat.pdfParseFailed"),
+        });
+      }
     } else if (isMd || isTxt) {
+      setPdfParse(null);
       const reader = new FileReader();
       reader.onload = () => {
         const text = reader.result as string;
@@ -442,7 +502,7 @@ export function ChatPanel({
       };
       reader.readAsText(file);
     }
-  }, []);
+  }, [pdfParse, t]);
 
   const handleDocFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -515,7 +575,8 @@ export function ChatPanel({
   }
 
   const isActive = isGenerating || isLoading;
-  const canAct = (input.trim().length > 0 || !!attachedFile) && !isActive;
+  const isPdfParsing = pdfParse?.status === "parsing";
+  const canAct = (input.trim().length > 0 || !!attachedFile) && !isActive && !isPdfParsing;
   const actionLabel = mode === "auto" ? t("chat.send") : t("chat.generate");
 
   const rawSteps = isGenerating
@@ -525,7 +586,112 @@ export function ChatPanel({
   const visibleSteps = (isActive || hasActiveStep) ? rawSteps : [];
 
   return (
-    <div className="flex h-full flex-col bg-surface-container-low/50 backdrop-blur-sm">
+    <div className="relative flex h-full flex-col bg-surface-container-low/50 backdrop-blur-sm">
+      {pdfParse && (
+        <div
+          className={clsx(
+            "absolute right-full top-3 z-30 mr-3 transition-all duration-200",
+            pdfPanelCollapsed ? "bottom-auto w-11" : "bottom-3",
+          )}
+          style={pdfPanelCollapsed ? undefined : { width: "clamp(320px, 32vw, 460px)" }}
+        >
+          {pdfPanelCollapsed ? (
+            <button
+              type="button"
+              onClick={() => setPdfPanelCollapsed(false)}
+              className="flex h-36 w-11 flex-col items-center justify-center gap-2 rounded-2xl border border-amber-100/70 bg-white/95 text-amber-700 shadow-2xl shadow-amber-950/10 backdrop-blur-xl transition hover:bg-amber-50"
+              title={pdfParse.status === "done" ? pdfParse.result.file_name : pdfParse.fileName}
+            >
+              <FileUp className="h-4 w-4" />
+              <span className="[writing-mode:vertical-rl] text-[11px] font-bold tracking-wide">PDF</span>
+            </button>
+          ) : (
+            <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-amber-100/70 bg-white/95 text-xs text-stone-700 shadow-2xl shadow-amber-950/10 backdrop-blur-xl">
+              <div className="flex items-center gap-2 border-b border-amber-100/70 bg-gradient-to-r from-amber-50/95 to-orange-50/80 px-3 py-2.5">
+                {pdfParse.status === "parsing" ? (
+                  <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-amber-500" />
+                ) : pdfParse.status === "error" ? (
+                  <AlertCircle className="h-4 w-4 flex-shrink-0 text-red-500" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-emerald-500" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-bold text-stone-800">
+                    {pdfParse.status === "done" ? pdfParse.result.file_name : pdfParse.fileName}
+                  </div>
+                  <div className="truncate text-[11px] text-amber-700">
+                    {pdfParse.status === "done"
+                      ? (pdfParse.selectedText
+                          ? t("chat.pdfSelectedChars", { count: String(pdfParse.selectedText.length) })
+                          : t("chat.pdfNoSelection"))
+                      : pdfParse.status === "parsing"
+                        ? t("chat.pdfParsing")
+                        : t("chat.pdfParseFailed")}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPdfPanelCollapsed(true)}
+                  className="rounded-full p-1.5 text-stone-400 transition hover:bg-white hover:text-amber-700"
+                  title={t("chat.collapsePanel")}
+                >
+                  <PanelRightOpen className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPdfParse(null)}
+                  className="rounded-full p-1.5 text-stone-400 transition hover:bg-white hover:text-red-500"
+                  title={t("chat.close")}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+                {pdfParse.status === "parsing" && (
+                  <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-3 text-amber-700">
+                    {t("chat.pdfParsing")}
+                  </div>
+                )}
+                {pdfParse.status === "error" && (
+                  <div className="rounded-xl border border-red-100 bg-red-50 p-3 text-red-600">
+                    {pdfParse.error}
+                  </div>
+                )}
+                {pdfParse.status === "done" && (
+                  <>
+                    <p className="text-[11px] leading-relaxed text-stone-500">{t("chat.pdfSelectHint")}</p>
+                    <pre
+                      ref={pdfTextRef}
+                      onMouseUp={handlePdfTextSelection}
+                      onKeyUp={handlePdfTextSelection}
+                      className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-xl border border-stone-200/80 bg-stone-50/70 p-3 font-mono text-[12px] leading-relaxed text-stone-700"
+                    >
+                      {pdfParse.result.markdown}
+                    </pre>
+                    <div className="flex items-center gap-2 border-t border-amber-100/70 pt-2">
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-amber-700">
+                        {pdfParse.selectedText
+                          ? t("chat.pdfSelectedChars", { count: String(pdfParse.selectedText.length) })
+                          : t("chat.pdfNoSelection")}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleUsePdfSelection}
+                        disabled={!pdfParse.selectedText.trim() || isActive}
+                        className="rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm shadow-amber-200/60 transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {t("chat.pdfUseSelection")}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Header ── */}
       <div className="flex items-center justify-between bg-surface-container-lowest/80 px-4 py-2.5 backdrop-blur-xl border-b border-outline-variant/8">
         <div className="flex items-center gap-2.5">
@@ -699,9 +865,18 @@ export function ChatPanel({
 
           {/* Attached file preview */}
           {attachedFile && (
-            <div className="mx-3 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1">
+            <div className="mx-3 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5">
               <FileUp className="h-3.5 w-3.5 text-amber-500" />
-              <span className="flex-1 truncate text-xs text-amber-700">{attachedFile.name}</span>
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium text-amber-800">{attachedFile.name}</span>
+                <span className="block truncate text-[10px] text-amber-700">
+                  {attachedFile.type === "pdf-selection"
+                    ? t("chat.pdfSelectionAttached")
+                    : attachedFile.type === "markdown"
+                      ? t("chat.mdAttached")
+                      : t("chat.txtAttached")}
+                </span>
+              </div>
               <button
                 onClick={() => setAttachedFile(null)}
                 className="text-outline hover:text-red-500"
@@ -728,21 +903,19 @@ export function ChatPanel({
               <Paperclip className="h-3.5 w-3.5" />
             </button>
 
-            {mode === "auto" && (
-              <button
-                onClick={() => document.getElementById("doc-file-input")?.click()}
-                disabled={isActive}
-                className={clsx(
-                  "mb-0.5 shrink-0 rounded-full border p-1 transition-all",
-                  attachedFile
-                    ? "border-primary/30 bg-primary-container/30 text-primary"
-                    : "border-outline-variant/10 text-outline hover:border-outline-variant/20 hover:text-on-surface-variant",
-                )}
-                title={t("chat.uploadFile")}
-              >
-                <FileUp className="h-3.5 w-3.5" />
-              </button>
-            )}
+            <button
+              onClick={() => document.getElementById("doc-file-input")?.click()}
+              disabled={isActive || isPdfParsing}
+              className={clsx(
+                "mb-0.5 shrink-0 rounded-full border p-1 transition-all",
+                attachedFile || pdfParse
+                  ? "border-primary/30 bg-primary-container/30 text-primary"
+                  : "border-outline-variant/10 text-outline hover:border-outline-variant/20 hover:text-on-surface-variant",
+              )}
+              title={t("chat.uploadFile")}
+            >
+              <FileUp className="h-3.5 w-3.5" />
+            </button>
 
             {/* Mode */}
             <div className="flex min-w-0">
@@ -958,7 +1131,7 @@ function MessageBubble({
               <div className="min-w-0">
                 <span className="block truncate text-xs font-medium text-on-surface">{msg.attachedFile.name}</span>
                 <span className="text-[10px] text-amber-700">
-                  {msg.attachedFile.type === "pdf" ? t("chat.pdfAttached") : msg.attachedFile.type === "markdown" ? t("chat.mdAttached") : t("chat.txtAttached")}
+                  {msg.attachedFile.type === "pdf-selection" ? t("chat.pdfSelectionAttached") : msg.attachedFile.type === "pdf" ? t("chat.pdfAttached") : msg.attachedFile.type === "markdown" ? t("chat.mdAttached") : t("chat.txtAttached")}
                 </span>
               </div>
             </div>

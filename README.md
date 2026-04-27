@@ -18,6 +18,7 @@
 ## Features
 
 - 📝 Paste method description text → auto-generate pipeline diagrams
+- 📄 Upload paper PDFs, parse them with MinerU, and quote selected text for drawing prompts
 - 🎨 Three creation modes: Draft, Generation, and Assembly
 - 🖼️ Built-in style gallery with 250+ academic paper reference images
 - 🧰 Asset workshop with Bioicons, reusable personal assets, and AI-generated materials
@@ -35,6 +36,14 @@ Upload a hand-drawn sketch and turn it into a high-fidelity editable pipeline di
 | <img src="image/handwrite.jpg" alt="Hand-drawn sketch example" width="420"> | <img src="image/pipeline.png" alt="Editable pipeline diagram example" width="420"> |
 
 Figure 1 shows the rough hand-drawn sketch. Figure 2 shows the generated high-fidelity editable workflow diagram.
+
+### PDF Parsing and Quoted-Selection Drawing
+
+Upload a PDF in the AI Workbench and NanaDraw will call the MinerU online API to parse the document into Markdown. The parsed result appears in a scrollable, collapsible floating panel on the left side of the workbench. You can select a method paragraph, experiment flow, or paper-structure passage, click "Quote selection", enrich the prompt in your own words, and then continue through NanaDraw's existing generation flow.
+
+- PDF upload is available in Draft, Generation, Assembly, and Auto modes.
+- PDF content is sent only to MinerU for document parsing; NanaDraw does not automatically send the whole paper to the LLM.
+- Only the text explicitly quoted by the user is merged into the generation prompt.
 
 ### Creation Modes
 
@@ -164,6 +173,7 @@ After starting, click the ⚙️ gear icon in the top-right corner to configure:
 - **Image Model**: Default `gemini-3-pro-image-preview`
 - **Component Model**: Default `gemini-3.1-flash-image-preview`
 - **NanaSoul**: Custom AI persona for style constraints
+- **Document Parsing Token**: MinerU online API token for PDF parsing
 
 #### Data Directory (Environment Variable)
 
