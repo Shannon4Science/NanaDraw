@@ -103,75 +103,84 @@ async def parse_pdf_with_mineru(
     data_id = f"nanadraw-{uuid.uuid4().hex}"
     timeout = httpx.Timeout(connect=15.0, read=120.0, write=120.0, pool=15.0)
     make_client = client_factory or httpx.AsyncClient
+    client_kwargs: dict[str, Any] = {"timeout": timeout}
+    if client_factory is None:
+        # Avoid inheriting broken/unsupported proxy envs in local runs.
+        client_kwargs["trust_env"] = False
 
-    async with make_client(timeout=timeout) as client:
-        apply_body = {
-            "files": [
-                {
-                    "name": file_name,
-                    "data_id": data_id,
-                    "is_ocr": False,
-                }
-            ],
-            "model_version": "vlm",
-            "language": "ch",
-            "enable_table": True,
-            "enable_formula": True,
-        }
+    try:
+        async with make_client(**client_kwargs) as client:
+            apply_body = {
+                "files": [
+                    {
+                        "name": file_name,
+                        "data_id": data_id,
+                        "is_ocr": False,
+                    }
+                ],
+                "model_version": "vlm",
+                "language": "ch",
+                "enable_table": True,
+                "enable_formula": True,
+            }
 
-        apply_response = await client.post(
-            f"{MINERU_API_BASE}/file-urls/batch",
-            headers=_json_headers(token),
-            json=apply_body,
-        )
-        apply_response.raise_for_status()
-        apply_data = _ensure_success_payload(apply_response.json(), "upload URL request")
-
-        batch_id = str(apply_data.get("batch_id") or "")
-        file_urls = apply_data.get("file_urls")
-        if not batch_id or not isinstance(file_urls, list) or not file_urls:
-            raise MinerUError("MinerU upload URL response is missing batch_id or file_urls")
-
-        upload_response = await client.put(str(file_urls[0]), content=file_bytes)
-        upload_response.raise_for_status()
-
-        deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
-        result: dict[str, Any] | None = None
-        while time.monotonic() < deadline:
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
-            poll_response = await client.get(
-                f"{MINERU_API_BASE}/extract-results/batch/{batch_id}",
+            apply_response = await client.post(
+                f"{MINERU_API_BASE}/file-urls/batch",
                 headers=_json_headers(token),
+                json=apply_body,
             )
-            poll_response.raise_for_status()
-            poll_data = _ensure_success_payload(poll_response.json(), "result polling")
-            result = _extract_result(poll_data, data_id, file_name)
+            apply_response.raise_for_status()
+            apply_data = _ensure_success_payload(apply_response.json(), "upload URL request")
 
-            state = str(result.get("state") or "").lower()
-            if state == "done":
-                break
-            if state == "failed":
-                raise MinerUError(str(result.get("err_msg") or "MinerU parsing failed"))
-            if state and state not in ACTIVE_STATES:
-                raise MinerUError(f"Unexpected MinerU parsing state: {state}")
-        else:
-            raise MinerUError("MinerU parsing timed out")
+            batch_id = str(apply_data.get("batch_id") or "")
+            file_urls = apply_data.get("file_urls")
+            if not batch_id or not isinstance(file_urls, list) or not file_urls:
+                raise MinerUError("MinerU upload URL response is missing batch_id or file_urls")
 
-        if not result:
-            raise MinerUError("MinerU did not return a parsing result")
+            upload_response = await client.put(str(file_urls[0]), content=file_bytes)
+            upload_response.raise_for_status()
 
-        full_zip_url = str(result.get("full_zip_url") or "")
-        if not full_zip_url:
-            raise MinerUError("MinerU result is missing full_zip_url")
+            deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
+            result: dict[str, Any] | None = None
+            while time.monotonic() < deadline:
+                await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                poll_response = await client.get(
+                    f"{MINERU_API_BASE}/extract-results/batch/{batch_id}",
+                    headers=_json_headers(token),
+                )
+                poll_response.raise_for_status()
+                poll_data = _ensure_success_payload(poll_response.json(), "result polling")
+                result = _extract_result(poll_data, data_id, file_name)
 
-        markdown = await _download_full_markdown(client, full_zip_url)
-        if not markdown.strip():
-            raise MinerUError("MinerU returned empty Markdown")
+                state = str(result.get("state") or "").lower()
+                if state == "done":
+                    break
+                if state == "failed":
+                    raise MinerUError(str(result.get("err_msg") or "MinerU parsing failed"))
+                if state and state not in ACTIVE_STATES:
+                    raise MinerUError(f"Unexpected MinerU parsing state: {state}")
+            else:
+                raise MinerUError("MinerU parsing timed out")
 
-        return {
-            "file_name": file_name,
-            "markdown": markdown,
-            "batch_id": batch_id,
-            "data_id": str(result.get("data_id") or data_id),
-            "source": "mineru",
-        }
+            if not result:
+                raise MinerUError("MinerU did not return a parsing result")
+
+            full_zip_url = str(result.get("full_zip_url") or "")
+            if not full_zip_url:
+                raise MinerUError("MinerU result is missing full_zip_url")
+
+            markdown = await _download_full_markdown(client, full_zip_url)
+            if not markdown.strip():
+                raise MinerUError("MinerU returned empty Markdown")
+
+            return {
+                "file_name": file_name,
+                "markdown": markdown,
+                "batch_id": batch_id,
+                "data_id": str(result.get("data_id") or data_id),
+                "source": "mineru",
+            }
+    except httpx.ConnectError as exc:
+        raise MinerUError("无法连接 MinerU 服务，请检查网络、DNS 或代理设置") from exc
+    except httpx.TimeoutException as exc:
+        raise MinerUError("连接 MinerU 超时，请稍后重试") from exc
