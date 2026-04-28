@@ -132,6 +132,7 @@ const zh = {
   "chat.pdfSelectHint": "解析完成。请在下方文本中选择一段内容，再用于生成图。",
   "chat.pdfNoSelection": "尚未选择文本片段",
   "chat.pdfSelectedChars": "已选择 {count} 个字符",
+  "chat.pdfSelectAll": "全选",
   "chat.pdfUseSelection": "引用选中内容",
   "chat.referenceMaterial": "引用材料（{name}）：",
   "chat.userPromptWithReference": "用户补充要求：\n{prompt}",

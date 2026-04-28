@@ -458,6 +458,27 @@ export function ChatPanel({
     textareaRef.current?.focus();
   }, [isLoading, isGenerating, pdfParse]);
 
+  const handleSelectAllPdfText = useCallback(() => {
+    if (pdfParse?.status !== "done") return;
+    const allText = pdfParse.result.markdown.trim();
+    if (!allText) return;
+
+    setPdfParse((prev) => (
+      prev?.status === "done"
+        ? { ...prev, selectedText: allText }
+        : prev
+    ));
+
+    const container = pdfTextRef.current;
+    if (!container) return;
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, [pdfParse]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -684,6 +705,14 @@ export function ChatPanel({
                           ? t("chat.pdfSelectedChars", { count: String(pdfParse.selectedText.length) })
                           : t("chat.pdfNoSelection")}
                       </span>
+                      <button
+                        type="button"
+                        onClick={handleSelectAllPdfText}
+                        disabled={!pdfParse.result.markdown.trim() || isActive}
+                        className="rounded-full border border-amber-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {t("chat.pdfSelectAll")}
+                      </button>
                       <button
                         type="button"
                         onClick={handleUsePdfSelection}

@@ -134,6 +134,7 @@ const en: Record<TranslationKey, string> = {
   "chat.pdfSelectHint": "Parsing complete. Select a text snippet below, then use it to generate a diagram.",
   "chat.pdfNoSelection": "No text snippet selected yet",
   "chat.pdfSelectedChars": "{count} characters selected",
+  "chat.pdfSelectAll": "Select all",
   "chat.pdfUseSelection": "Quote selection",
   "chat.referenceMaterial": "Reference material ({name}):",
   "chat.userPromptWithReference": "User prompt:\n{prompt}",
