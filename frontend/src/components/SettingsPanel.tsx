@@ -17,7 +17,7 @@ const DEFAULT_TEXT_MODEL = "gemini-3.1-pro-preview";
 const DEFAULT_IMAGE_MODEL = "gemini-3-pro-image-preview";
 const NANA_SOUL_MAX = 500;
 
-type TabId = "api" | "nana";
+type TabId = "api" | "documents" | "nana";
 type ApiFormat = "auto" | "gemini_native" | "openai";
 
 export interface SettingsPanelProps {
@@ -43,7 +43,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [showKey, setShowKey] = useState(false);
   const [showImageKey, setShowImageKey] = useState(false);
   const [hasConfig, setHasConfig] = useState(false);
-
+  const [mineruApiToken, setMineruApiToken] = useState("");
+  const [isMineruConfigured, setIsMineruConfigured] = useState(false);
   const [nanaSoul, setNanaSoul] = useState("");
 
   useEffect(() => {
@@ -67,10 +68,14 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         setImageModel(cfg.image_model || data.llm_image_model || DEFAULT_IMAGE_MODEL);
         setApiFormat((cfg.api_format || data.api_format || "auto") as ApiFormat);
         setHasConfig(Boolean(cfg.has_custom_config || (pool?.base_url && pool?.api_keys)));
+        setMineruApiToken("");
+        setIsMineruConfigured(data.mineru_is_configured);
         setNanaSoul(data.nana_soul || "");
       })
       .catch(() => {
         if (cancelled) return;
+        setMineruApiToken("");
+        setIsMineruConfigured(false);
         setToast({ type: "error", text: t("settings.loadFailed") });
       })
       .finally(() => {
@@ -122,11 +127,24 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           apiFormat,
         );
         setHasConfig(true);
+      } else if (tab === "documents") {
+        const hasNewMineruToken = mineruApiToken.trim().length > 0;
+        if (!hasNewMineruToken && !isMineruConfigured) {
+          setToast({ type: "error", text: t("settings.mineruNotConfigured") });
+          return;
+        }
+        await updateSettings({
+          mineru_api_token: hasNewMineruToken ? mineruApiToken.trim() : undefined,
+        } as Partial<Omit<Settings, "is_configured" | "mineru_is_configured">>);
+        if (hasNewMineruToken) {
+          setIsMineruConfigured(true);
+          setMineruApiToken("");
+        }
       } else {
         await updateSettings({
           nana_soul: nanaSoul.slice(0, NANA_SOUL_MAX),
           language: "zh",
-        } as Partial<Omit<Settings, "is_configured">>);
+        } as Partial<Omit<Settings, "is_configured" | "mineru_is_configured">>);
       }
       onClose();
     } catch (e) {
@@ -135,7 +153,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     } finally {
       setSaving(false);
     }
-  }, [tab, baseUrl, apiKey, textModel, imageModel, imageBaseUrl, imageApiKey, apiFormat, nanaSoul, t, onClose]);
+  }, [tab, baseUrl, apiKey, textModel, imageModel, imageBaseUrl, imageApiKey, apiFormat, mineruApiToken, isMineruConfigured, nanaSoul, t, onClose]);
 
   const handleClear = useCallback(async () => {
     setSaving(true);
@@ -201,6 +219,18 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             )}
           >
             API 配置
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("documents")}
+            className={clsx(
+              "flex-1 rounded-t-lg px-3 py-2.5 text-sm font-semibold transition-colors",
+              tab === "documents"
+                ? "bg-white text-amber-700 shadow-[0_-1px_0_0_white]"
+                : "text-stone-500 hover:text-stone-700",
+            )}
+          >
+            {t("settings.documents")}
           </button>
           <button
             type="button"
@@ -333,6 +363,28 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               <p className="text-xs leading-relaxed text-stone-400">
                 配置后您的任务将以最高优先级执行，且不消耗积分。所有字段均为必填（Image 通道可选，若填写需 URL 与 Key 成对）。
               </p>
+            </div>
+          ) : tab === "documents" ? (
+            <div className="space-y-4">
+              <p className="text-xs leading-relaxed text-stone-500">{t("settings.mineruTokenHelper")}</p>
+              <label className="block">
+                <span className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-stone-600">
+                  {t("settings.mineruToken")}
+                  {isMineruConfigured && (
+                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-emerald-200/60">
+                      ✓ {t("settings.apiKeyConfigured")}
+                    </span>
+                  )}
+                </span>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  value={mineruApiToken}
+                  onChange={(e) => setMineruApiToken(e.target.value)}
+                  className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                  placeholder={isMineruConfigured ? t("settings.apiKeyPlaceholder") : ""}
+                />
+              </label>
             </div>
           ) : (
             <div className="space-y-3">

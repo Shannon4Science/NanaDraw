@@ -12,9 +12,11 @@ export interface Settings {
   llm_image_model: string;
   llm_component_model: string;
   api_format: "auto" | "gemini_native" | "openai";
+  mineru_api_token: string;
   nana_soul: string;
   language: string;
   is_configured: boolean;
+  mineru_is_configured: boolean;
 }
 
 export interface LLMPoolDisplay {
@@ -37,7 +39,9 @@ export async function getSettings(): Promise<Settings> {
   return res.json();
 }
 
-export async function updateSettings(data: Partial<Omit<Settings, "is_configured">>): Promise<Settings> {
+export async function updateSettings(
+  data: Partial<Omit<Settings, "is_configured" | "mineru_is_configured">>,
+): Promise<Settings> {
   const res = await fetch(`${API_BASE}/settings`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },

@@ -18,6 +18,9 @@ DEFAULTS: dict[str, Any] = {
     "llm_image_model": "gemini-3-pro-image-preview",
     "llm_component_model": "gemini-3.1-flash-image-preview",
     "api_format": "auto",
+    "mineru_api_token": "",
+    "api_format": "auto",
+    "mineru_api_token": "",
     "nana_soul": "",
     "language": "zh",
 }
@@ -103,6 +106,10 @@ def _persist_unlocked(merged: dict[str, Any]) -> dict[str, Any]:
         "llm_api_key": mask_api_key(str(to_store.get("llm_api_key", ""))),
         "image_api_key": mask_api_key(str(to_store.get("image_api_key", ""))),
         "vision_api_key": mask_api_key(str(to_store.get("vision_api_key", ""))),
+        "mineru_api_token": mask_api_key(str(to_store.get("mineru_api_token", ""))),
+        "image_api_key": mask_api_key(str(to_store.get("image_api_key", ""))),
+        "vision_api_key": mask_api_key(str(to_store.get("vision_api_key", ""))),
+        "mineru_api_token": mask_api_key(str(to_store.get("mineru_api_token", ""))),
     }
     logger.info("Settings saved: %s", log_payload)
     return dict(to_store)
