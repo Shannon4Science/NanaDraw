@@ -146,7 +146,7 @@ export function ProjectsPage() {
     try {
       const { id } = await createProject(undefined, "drawio");
       setNewProjectOpen(false);
-      navigate(`/draw?project=${id}&canvas=drawio`);
+      navigate(`/draw?project=${id}&canvas=drawio&fresh=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("projects.createFailed"));
     } finally {

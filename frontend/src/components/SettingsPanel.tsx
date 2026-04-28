@@ -3,15 +3,22 @@ import { createPortal } from "react-dom";
 import { Loader2, X } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "../contexts/LanguageContext";
-import { getSettings, updateSettings, type Settings } from "../services/settingsApi";
+import {
+  clearLLMConfig,
+  fetchLLMConfig,
+  getSettings,
+  updateLLMConfig,
+  updateSettings,
+  type Settings,
+} from "../services/settingsApi";
 
 const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
 const DEFAULT_TEXT_MODEL = "gemini-3.1-pro-preview";
 const DEFAULT_IMAGE_MODEL = "gemini-3-pro-image-preview";
-const DEFAULT_COMPONENT_MODEL = "gemini-3.1-flash-image-preview";
 const NANA_SOUL_MAX = 500;
 
 type TabId = "api" | "nana";
+type ApiFormat = "auto" | "gemini_native" | "openai";
 
 export interface SettingsPanelProps {
   open: boolean;
@@ -26,42 +33,45 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const [llmApiKey, setLlmApiKey] = useState("");
-  const [isKeyConfigured, setIsKeyConfigured] = useState(false);
-  const [llmBaseUrl, setLlmBaseUrl] = useState(DEFAULT_BASE_URL);
-  const [llmModel, setLlmModel] = useState(DEFAULT_TEXT_MODEL);
-  const [llmImageModel, setLlmImageModel] = useState(DEFAULT_IMAGE_MODEL);
-  const [llmComponentModel, setLlmComponentModel] = useState(DEFAULT_COMPONENT_MODEL);
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
+  const [apiKey, setApiKey] = useState("");
+  const [imageBaseUrl, setImageBaseUrl] = useState("");
+  const [imageApiKey, setImageApiKey] = useState("");
+  const [textModel, setTextModel] = useState(DEFAULT_TEXT_MODEL);
+  const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
+  const [apiFormat, setApiFormat] = useState<ApiFormat>("auto");
+  const [showKey, setShowKey] = useState(false);
+  const [showImageKey, setShowImageKey] = useState(false);
+  const [hasConfig, setHasConfig] = useState(false);
+
   const [nanaSoul, setNanaSoul] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setTab("api");
     setToast(null);
+    setShowKey(false);
+    setShowImageKey(false);
     let cancelled = false;
     setLoading(true);
-    getSettings()
-      .then((data: Settings) => {
+    Promise.all([fetchLLMConfig(), getSettings()])
+      .then(([cfg, data]) => {
         if (cancelled) return;
-        setLlmApiKey("");
-        setIsKeyConfigured(data.is_configured);
-        setLlmBaseUrl(data.llm_base_url || DEFAULT_BASE_URL);
-        setLlmModel(data.llm_model || DEFAULT_TEXT_MODEL);
-        setLlmImageModel(data.llm_image_model || DEFAULT_IMAGE_MODEL);
-        setLlmComponentModel(data.llm_component_model || DEFAULT_COMPONENT_MODEL);
+        const pool = cfg.pools?.[0];
+        const imagePool = cfg.image_pools?.[0];
+        setBaseUrl(pool?.base_url || data.llm_base_url || DEFAULT_BASE_URL);
+        setApiKey(pool?.api_keys || "");
+        setImageBaseUrl(imagePool?.base_url || data.image_base_url || "");
+        setImageApiKey(imagePool?.api_keys || "");
+        setTextModel(cfg.text_model || data.llm_model || DEFAULT_TEXT_MODEL);
+        setImageModel(cfg.image_model || data.llm_image_model || DEFAULT_IMAGE_MODEL);
+        setApiFormat((cfg.api_format || data.api_format || "auto") as ApiFormat);
+        setHasConfig(Boolean(cfg.has_custom_config || (pool?.base_url && pool?.api_keys)));
         setNanaSoul(data.nana_soul || "");
       })
       .catch(() => {
-        if (!cancelled) {
-          setLlmApiKey("");
-          setIsKeyConfigured(false);
-          setLlmBaseUrl(DEFAULT_BASE_URL);
-          setLlmModel(DEFAULT_TEXT_MODEL);
-          setLlmImageModel(DEFAULT_IMAGE_MODEL);
-          setLlmComponentModel(DEFAULT_COMPONENT_MODEL);
-          setNanaSoul("");
-          setToast({ type: "error", text: t("settings.loadFailed") });
-        }
+        if (cancelled) return;
+        setToast({ type: "error", text: t("settings.loadFailed") });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -89,35 +99,63 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   }, [toast]);
 
   const handleSave = useCallback(async () => {
-    const hasNewKey = llmApiKey.trim().length > 0;
-    if (!hasNewKey && !isKeyConfigured) {
-      setToast({ type: "error", text: t("settings.notConfigured") });
-      return;
-    }
     setSaving(true);
     try {
-      const payload: Record<string, unknown> = {
-        llm_base_url: llmBaseUrl.trim() || DEFAULT_BASE_URL,
-        llm_model: llmModel.trim() || DEFAULT_TEXT_MODEL,
-        llm_image_model: llmImageModel.trim() || DEFAULT_IMAGE_MODEL,
-        llm_component_model: llmComponentModel.trim() || DEFAULT_COMPONENT_MODEL,
-        nana_soul: nanaSoul.slice(0, NANA_SOUL_MAX),
-        language: "zh",
-      };
-      if (hasNewKey) {
-        payload.llm_api_key = llmApiKey.trim();
-      }
-      await updateSettings(payload as Partial<Omit<Settings, "is_configured">>);
-      if (hasNewKey) {
-        setIsKeyConfigured(true);
+      if (tab === "api") {
+        if (!baseUrl.trim() || !apiKey.trim() || !textModel.trim() || !imageModel.trim()) {
+          setToast({ type: "error", text: "Base URL、API Key、文本模型、生图模型不能为空" });
+          return;
+        }
+        const hasImageBase = imageBaseUrl.trim().length > 0;
+        const hasImageKey = imageApiKey.trim().length > 0;
+        if (hasImageBase !== hasImageKey) {
+          setToast({ type: "error", text: "Image Base URL 与 Image API Key 需同时填写，或同时留空" });
+          return;
+        }
+        await updateLLMConfig(
+          baseUrl.trim(),
+          apiKey.trim(),
+          textModel.trim(),
+          imageModel.trim(),
+          imageBaseUrl.trim() || undefined,
+          imageApiKey.trim() || undefined,
+          apiFormat,
+        );
+        setHasConfig(true);
+      } else {
+        await updateSettings({
+          nana_soul: nanaSoul.slice(0, NANA_SOUL_MAX),
+          language: "zh",
+        } as Partial<Omit<Settings, "is_configured">>);
       }
       onClose();
-    } catch {
-      setToast({ type: "error", text: t("settings.saveFailed") });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : t("settings.saveFailed");
+      setToast({ type: "error", text: msg });
     } finally {
       setSaving(false);
     }
-  }, [llmApiKey, isKeyConfigured, llmBaseUrl, llmModel, llmImageModel, llmComponentModel, nanaSoul, t]);
+  }, [tab, baseUrl, apiKey, textModel, imageModel, imageBaseUrl, imageApiKey, apiFormat, nanaSoul, t, onClose]);
+
+  const handleClear = useCallback(async () => {
+    setSaving(true);
+    try {
+      await clearLLMConfig();
+      setBaseUrl(DEFAULT_BASE_URL);
+      setApiKey("");
+      setImageBaseUrl("");
+      setImageApiKey("");
+      setTextModel(DEFAULT_TEXT_MODEL);
+      setImageModel(DEFAULT_IMAGE_MODEL);
+      setApiFormat("auto");
+      setHasConfig(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "清除失败";
+      setToast({ type: "error", text: msg });
+    } finally {
+      setSaving(false);
+    }
+  }, []);
 
   if (!open) return null;
 
@@ -133,7 +171,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         aria-modal="true"
         aria-labelledby="settings-title"
         tabIndex={-1}
-        className="flex max-h-[min(90vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-amber-100/60 bg-white shadow-2xl shadow-amber-100/40 outline-none"
+        className="flex max-h-[min(90vh,760px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-amber-100/60 bg-white shadow-2xl shadow-amber-100/40 outline-none"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
       >
@@ -162,7 +200,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 : "text-stone-500 hover:text-stone-700",
             )}
           >
-            {t("settings.apiConfig")}
+            API 配置
           </button>
           <button
             type="button"
@@ -185,66 +223,116 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               <span className="text-sm">{t("chat.loading")}</span>
             </div>
           ) : tab === "api" ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold text-stone-800">自定义 LLM 配置</h3>
+
               <label className="block">
-                <span className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-stone-600">
-                  {t("settings.apiKey")}
-                  {isKeyConfigured && (
-                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-emerald-200/60">
-                      ✓ {t("settings.apiKeyConfigured")}
-                    </span>
-                  )}
-                </span>
+                <span className="mb-1.5 block text-xs font-semibold text-stone-600">Base URL</span>
                 <input
                   type="text"
-                  autoComplete="off"
-                  value={llmApiKey}
-                  onChange={(e) => setLlmApiKey(e.target.value)}
-                  className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
-                  placeholder={isKeyConfigured ? t("settings.apiKeyPlaceholder") : ""}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-stone-600">{t("settings.baseUrl")}</span>
-                <input
-                  type="url"
-                  value={llmBaseUrl}
-                  onChange={(e) => setLlmBaseUrl(e.target.value)}
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
                   placeholder={DEFAULT_BASE_URL}
-                  className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
                 />
-                <span className="mt-1 block text-[11px] leading-relaxed text-stone-400">{t("settings.baseUrlHint")}</span>
               </label>
+
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-stone-600">{t("settings.textModel")}</span>
+                <span className="mb-1.5 block text-xs font-semibold text-stone-600">API Key</span>
+                <div className="relative">
+                  <input
+                    type={showKey ? "text" : "password"}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="sk-..."
+                    className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 pr-16 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-stone-500 hover:text-stone-700"
+                    onClick={() => setShowKey((v) => !v)}
+                  >
+                    {showKey ? "隐藏" : "显示"}
+                  </button>
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-stone-600">Image Base URL（可选，留空则复用上方文本通道）</span>
                 <input
                   type="text"
-                  value={llmModel}
-                  onChange={(e) => setLlmModel(e.target.value)}
+                  value={imageBaseUrl}
+                  onChange={(e) => setImageBaseUrl(e.target.value)}
+                  placeholder="https://api.openai.com/v1"
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-stone-600">Image API Key（可选）</span>
+                <div className="relative">
+                  <input
+                    type={showImageKey ? "text" : "password"}
+                    value={imageApiKey}
+                    onChange={(e) => setImageApiKey(e.target.value)}
+                    placeholder="sk-..."
+                    className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 pr-16 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-stone-500 hover:text-stone-700"
+                    onClick={() => setShowImageKey((v) => !v)}
+                  >
+                    {showImageKey ? "隐藏" : "显示"}
+                  </button>
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-stone-600">文本模型</span>
+                <input
+                  type="text"
+                  value={textModel}
+                  onChange={(e) => setTextModel(e.target.value)}
                   placeholder={DEFAULT_TEXT_MODEL}
-                  className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
                 />
               </label>
+
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-stone-600">{t("settings.imageModel")}</span>
+                <span className="mb-1.5 block text-xs font-semibold text-stone-600">生图模型</span>
                 <input
                   type="text"
-                  value={llmImageModel}
-                  onChange={(e) => setLlmImageModel(e.target.value)}
+                  value={imageModel}
+                  onChange={(e) => setImageModel(e.target.value)}
                   placeholder={DEFAULT_IMAGE_MODEL}
-                  className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
                 />
               </label>
+
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-stone-600">{t("settings.componentModel")}</span>
-                <input
-                  type="text"
-                  value={llmComponentModel}
-                  onChange={(e) => setLlmComponentModel(e.target.value)}
-                  placeholder={DEFAULT_COMPONENT_MODEL}
-                  className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
-                />
+                <span className="mb-1.5 block text-xs font-semibold text-stone-600">API 格式</span>
+                <select
+                  value={apiFormat}
+                  onChange={(e) => setApiFormat(e.target.value as ApiFormat)}
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
+                >
+                  <option value="auto">自动检测</option>
+                  <option value="gemini_native">Gemini 原生</option>
+                  <option value="openai">OpenAI 兼容</option>
+                </select>
+                <span className="mt-1 block text-[11px] leading-relaxed text-stone-400">
+                  使用 Nano Banana 等 Gemini 服务选「Gemini 原生」；多数中转服务选「OpenAI 兼容」
+                </span>
               </label>
+
+              <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                推荐使用兼容 OpenAI 格式的中转 API 调用推荐模型，使用其他模型可能存在未经过测试的兼容性问题或效果差距。
+              </div>
+
+              <p className="text-xs leading-relaxed text-stone-400">
+                配置后您的任务将以最高优先级执行，且不消耗积分。所有字段均为必填（Image 通道可选，若填写需 URL 与 Key 成对）。
+              </p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -266,26 +354,47 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-stone-100 bg-stone-50/50 px-5 py-4">
-          {toast && (
-            <span
-              className={clsx(
-                "text-sm font-medium",
-                toast.type === "success" ? "text-emerald-600" : "text-red-600",
-              )}
+          {tab === "api" ? (
+            <button
+              type="button"
+              onClick={handleClear}
+              disabled={saving || loading || !hasConfig}
+              className="text-sm font-medium text-red-500 transition hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {toast.text}
-            </span>
+              清除配置
+            </button>
+          ) : (
+            <span />
           )}
-          {!toast && <span />}
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving || loading}
-            className="inline-flex min-w-[100px] items-center justify-center gap-2 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-amber-200/50 transition hover:opacity-95 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {t("settings.save")}
-          </button>
+
+          <div className="flex items-center gap-2">
+            {toast && (
+              <span
+                className={clsx(
+                  "text-xs font-medium",
+                  toast.type === "success" ? "text-emerald-600" : "text-red-600",
+                )}
+              >
+                {toast.text}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full px-4 py-2 text-sm text-stone-500 transition hover:bg-stone-100"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || loading}
+              className="inline-flex min-w-[84px] items-center justify-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              保存
+            </button>
+          </div>
         </div>
       </div>
     </div>,

@@ -484,7 +484,7 @@ export function useAssistant(canvasType?: string) {
           },
         },
         controller.signal,
-        selectedMode === "auto" ? undefined : selectedMode,
+        selectedMode === "auto" ? "full_gen" : selectedMode,
         options?.styleRefId ?? undefined,
         sessionIdRef.current,
         effectiveSketch ?? undefined,
@@ -542,6 +542,11 @@ export function useAssistant(canvasType?: string) {
       abortRef.current = controller;
 
       const mode = state.originalMode === "fast" ? "fast" : "full_gen";
+      const retryOptions: Record<string, unknown> = {};
+      if (state.originalMode === "free") retryOptions.free = true;
+      if (state.originalMode === "image_only") retryOptions.image_only = true;
+      if (state.originalMode === "text_edit") retryOptions.text_edit = true;
+      if (state.originalMode === "gpt_image") retryOptions.gpt_image = true;
       const baseCallbacks = makePipelineCallbacks(setState, t);
 
       generateDiagram(
@@ -550,6 +555,7 @@ export function useAssistant(canvasType?: string) {
           mode,
           request_id: state.requestId,
           resume_from: stepId,
+          ...(Object.keys(retryOptions).length > 0 ? { options: retryOptions } : {}),
         },
         {
           ...baseCallbacks,
@@ -675,6 +681,9 @@ function toolCallLabel(name: string, args: Record<string, unknown>, t: (key: Tra
     case "generate_diagram": {
       const mode = args.mode as string | undefined;
       if (mode === "image_only") return t("chat.mode.imageOnly");
+      if (mode === "free") return t("chat.mode.free");
+      if (mode === "gpt_image") return t("chat.mode.gptImage");
+      if (mode === "text_edit") return t("chat.mode.textEdit");
       if (mode === "full_gen") return t("assistant.toolFullGen");
       if (mode === "draft") return t("assistant.toolDraft");
       return t("assistant.toolGenDiagram");
