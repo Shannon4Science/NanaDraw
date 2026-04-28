@@ -3,6 +3,7 @@ import { tStandalone as t } from "../contexts/LanguageContext";
 const PATH_PREFIX = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API_BASE = `${PATH_PREFIX}/api/v1`;
 const SETTINGS_API = `${PATH_PREFIX}/api/v1/settings`;
+const FALLBACK_API_BASE = "/api/v1";
 
 export async function fetchNanaSoul(): Promise<string> {
   const res = await fetch(SETTINGS_API);
@@ -245,6 +246,38 @@ export async function fetchAssistantStatus(): Promise<{ enabled: boolean }> {
   } catch {
     return { enabled: false };
   }
+}
+
+// ── Document Parsing API ──
+
+export interface ParsedPdfResult {
+  file_name: string;
+  markdown: string;
+  batch_id: string;
+  data_id: string;
+  source: "mineru";
+}
+
+async function fetchDocumentsApi(path: string, init?: RequestInit): Promise<Response> {
+  const primary = await fetch(`${API_BASE}${path}`, init);
+  const contentType = (primary.headers.get("content-type") || "").toLowerCase();
+  const shouldFallback = primary.status === 404 || contentType.includes("text/html");
+  if (!shouldFallback) return primary;
+  return fetch(`${FALLBACK_API_BASE}${path}`, init);
+}
+
+export async function parsePdfDocument(file: File): Promise<ParsedPdfResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetchDocumentsApi("/documents/parse-pdf", {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: t("svc.pdfParseFailed") }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
 }
 
 
@@ -670,4 +703,3 @@ export async function assistantChat(
     }
   }
 }
-

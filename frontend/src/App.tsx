@@ -14,6 +14,9 @@ function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/draw" element={<DrawPage />} />
+            <Route path="/nanadraw" element={<LandingPage />} />
+            <Route path="/nanadraw/projects" element={<ProjectsPage />} />
+            <Route path="/nanadraw/draw" element={<DrawPage />} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>

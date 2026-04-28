@@ -18,6 +18,7 @@
 
 - 🆕 NanaDraw now supports the GPT Image 2 model as an image generation option
 - 📝 Paste method description text → auto-generate pipeline diagrams
+- 📎 Use one upload entry for images, PDFs, and text files; images become sketch references, while PDFs are parsed with MinerU for quoted-selection prompts
 - 🎨 Three creation modes: Draft, Generation, and Assembly
 - 🖼️ Built-in style gallery with 250+ academic paper reference images
 - 🧰 Asset workshop with Bioicons, reusable personal assets, and AI-generated materials
@@ -35,6 +36,15 @@ Upload a hand-drawn sketch and turn it into a high-fidelity editable pipeline di
 | <img src="image/handwrite.jpg" alt="Hand-drawn sketch example" width="420"> | <img src="image/pipeline.png" alt="Editable pipeline diagram example" width="420"> |
 
 Figure 1 shows the rough hand-drawn sketch. Figure 2 shows the generated high-fidelity editable workflow diagram.
+
+### PDF Parsing and Quoted-Selection Drawing
+
+The AI Workbench provides one upload entry for images, PDFs, Markdown, and text files. NanaDraw routes each file by type: images become sketch references, PDFs are parsed into Markdown through the MinerU online API, and Markdown/Text files are attached as prompt reference material.
+
+- File upload is available in Draft, Generation, Assembly, and Auto modes.
+- Parsed PDFs appear in a scrollable, collapsible floating panel on the left side of the workbench.
+- PDF content is sent only to MinerU for document parsing; NanaDraw does not automatically send the whole paper to the LLM.
+- Only the text explicitly quoted by the user is merged into the generation prompt; users can enrich the prompt before generating.
 
 ### Creation Modes
 
@@ -164,6 +174,7 @@ After starting, click the ⚙️ gear icon in the top-right corner to configure:
 - **Image Model**: Default `gemini-3-pro-image-preview`
 - **Component Model**: Default `gemini-3.1-flash-image-preview`
 - **NanaSoul**: Custom AI persona for style constraints
+- **Document Parsing Token**: MinerU online API token for PDF parsing
 
 #### Data Directory (Environment Variable)
 
