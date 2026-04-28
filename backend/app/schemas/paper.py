@@ -84,9 +84,25 @@ class GenerateOptions(BaseModel):
         False,
         description="When True, stop after image generation (Steps 1-2 of full_gen)",
     )
-    canvas_type: Literal["drawio"] = Field(
+    gpt_image: bool = Field(
+        False,
+        description="Deprecated alias for free mode (backward compatibility)",
+    )
+    free: bool = Field(
+        False,
+        description="When True, run free mode (single-step direct image generation)",
+    )
+    text_edit: bool = Field(
+        False,
+        description="When True, run text-edit mode (background image + editable text overlay)",
+    )
+    model_preset: str | None = Field(
+        None,
+        description="Optional model preset ID",
+    )
+    canvas_type: Literal["drawio", "ppt"] = Field(
         "drawio",
-        description="Target canvas: drawio XML",
+        description="Target canvas: drawio XML or PPTist slides JSON",
     )
 
 

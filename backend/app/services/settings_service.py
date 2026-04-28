@@ -9,10 +9,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULTS: dict[str, Any] = {
     "llm_api_key": "",
+    "image_api_key": "",
+    "vision_api_key": "",
     "llm_base_url": "",
+    "image_base_url": "",
+    "vision_base_url": "",
     "llm_model": "gemini-3.1-pro-preview",
     "llm_image_model": "gemini-3-pro-image-preview",
     "llm_component_model": "gemini-3.1-flash-image-preview",
+    "api_format": "auto",
     "mineru_api_token": "",
     "nana_soul": "",
     "language": "zh",
@@ -97,6 +102,8 @@ def _persist_unlocked(merged: dict[str, Any]) -> dict[str, Any]:
     log_payload = {
         **to_store,
         "llm_api_key": mask_api_key(str(to_store.get("llm_api_key", ""))),
+        "image_api_key": mask_api_key(str(to_store.get("image_api_key", ""))),
+        "vision_api_key": mask_api_key(str(to_store.get("vision_api_key", ""))),
         "mineru_api_token": mask_api_key(str(to_store.get("mineru_api_token", ""))),
     }
     logger.info("Settings saved: %s", log_payload)

@@ -9,6 +9,7 @@ import { ExportPanel } from "../components/ExportPanel";
 import { SaveElementDialog } from "../components/SaveElementDialog";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { exportDrawioToPptx } from "../lib/pptxExport";
+import { removeDiagramXml } from "../lib/diagramStorage";
 import { LanguageSwitcher, UserButton } from "../components/UserButton";
 import { useGallery } from "../hooks/useGallery";
 import type { PipelineStep } from "../hooks/useGenerate";
@@ -22,6 +23,7 @@ import type { TranslationKey } from "../i18n/zh";
 
 type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
 const AUTO_SAVE_INTERVAL = 30_000;
+const EMPTY_DRAWIO_XML = '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>';
 
 function detectImageMime(b64: string): string {
   if (b64.startsWith("/9j/")) return "image/jpeg";
@@ -65,6 +67,17 @@ const MODE_DEFAULT_STEP_KEYS: Record<string, { id: string; nameKey: TranslationK
     { id: "planning", nameKey: "draw.mode.textPlanning" },
     { id: "result_image", nameKey: "draw.mode.resultImage" },
   ],
+  free: [
+    { id: "result_image", nameKey: "draw.mode.resultImage" },
+  ],
+  gpt_image: [
+    { id: "result_image", nameKey: "draw.mode.resultImage" },
+  ],
+  text_edit: [
+    { id: "planning", nameKey: "draw.mode.textPlanning" },
+    { id: "result_image", nameKey: "draw.mode.resultImage" },
+    { id: "text_extraction", nameKey: "draw.mode.assembly" },
+  ],
 };
 
 export function DrawPage() {
@@ -72,6 +85,7 @@ export function DrawPage() {
   const navigate = useNavigate();
   const t = useT();
   const projectId = searchParams.get("project");
+  const fresh = searchParams.get("fresh") === "1";
 
   const [text, setText] = useState("");
   const [mode, setMode] = useState<AssistantMode>("auto");
@@ -125,16 +139,47 @@ export function DrawPage() {
   const editorRef = useRef<DiagramEditorHandle>(null);
   const manualGenActiveRef = useRef(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoCreateProjectRef = useRef(false);
   const latestCanvasDataRef = useRef<string | null>(null);
   const pendingCloudDataRef = useRef<string | null>(null);
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
   const suppressDirtyRef = useRef(false);
   const suppressDirtyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const freshHandledRef = useRef(false);
 
   const gallery = useGallery();
   const gen = useGenerate();
   const userEls = useUserElements();
+
+  // Explicit new-canvas flow: clear local recovery cache and start from blank canvas.
+  useEffect(() => {
+    if (!fresh || freshHandledRef.current) return;
+    freshHandledRef.current = true;
+
+    removeDiagramXml().catch(() => {});
+    latestCanvasDataRef.current = null;
+    pendingCloudDataRef.current = null;
+    setSaveStatus("idle");
+    setCloudProjectName(null);
+    setText("");
+    setSelectedStyleId(null);
+    setMode("auto");
+    setAssistantSteps([]);
+    setAssistantRefImage(null);
+    setAssistantQueue({ position: null, total: null });
+    setRegenRequest(null);
+    setCanvasRegenRequest(null);
+    setShowSaveDialog(false);
+    setSaveDialogName("");
+
+    editorRef.current?.loadXml(EMPTY_DRAWIO_XML);
+
+    const params = new URLSearchParams(window.location.search);
+    params.delete("fresh");
+    const qs = params.toString();
+    navigate(qs ? `/draw?${qs}` : "/draw", { replace: true });
+  }, [fresh, navigate]);
 
   // When direct-gen starts, clear stale assistant data and expand panel
   useEffect(() => {
@@ -313,6 +358,27 @@ export function DrawPage() {
     }
   }, [getCurrentCanvasData, getThumbnailB64]);
 
+  const ensureProjectForAutoSave = useCallback(async (): Promise<string | null> => {
+    if (projectIdRef.current) return projectIdRef.current;
+    if (autoCreateProjectRef.current) return null;
+    autoCreateProjectRef.current = true;
+    try {
+      const { id } = await createProject(undefined, CANVAS_TYPE);
+      projectIdRef.current = id;
+      setCloudProjectName(t("svc.defaultProjectName"));
+      serverNameRef.current = t("svc.defaultProjectName");
+      const params = new URLSearchParams(window.location.search);
+      params.set("project", id);
+      navigate(`/draw?${params.toString()}`, { replace: true });
+      return id;
+    } catch {
+      setSaveStatus("error");
+      return null;
+    } finally {
+      autoCreateProjectRef.current = false;
+    }
+  }, [navigate, t]);
+
   const handleManualSave = useCallback(async () => {
     if (!projectIdRef.current) {
       setShowSaveDialog(true);
@@ -384,6 +450,16 @@ export function DrawPage() {
           } catch {
             console.error("Failed to load canvas data from backend proxy");
           }
+        } else {
+          latestCanvasDataRef.current = null;
+          if (editorRef.current) {
+            suppressDirtyRef.current = true;
+            if (suppressDirtyTimerRef.current) clearTimeout(suppressDirtyTimerRef.current);
+            suppressDirtyTimerRef.current = setTimeout(() => { suppressDirtyRef.current = false; }, 1000);
+            editorRef.current.loadXml(EMPTY_DRAWIO_XML);
+          } else {
+            pendingCloudDataRef.current = EMPTY_DRAWIO_XML;
+          }
         }
         setSaveStatus("saved");
       } catch (e: unknown) {
@@ -405,18 +481,19 @@ export function DrawPage() {
   // Periodic auto-save every 30 seconds
   useEffect(() => {
     autoSaveTimerRef.current = setInterval(() => {
-      if (
-        projectIdRef.current
-        && (saveStatus === "dirty" || saveStatus === "error")
-        && latestCanvasDataRef.current
-      ) {
+      if (!(saveStatus === "dirty" || saveStatus === "error") || !latestCanvasDataRef.current) return;
+      if (projectIdRef.current) {
         doCloudSave();
+        return;
       }
+      ensureProjectForAutoSave().then((pid) => {
+        if (pid) doCloudSave({ projectId: pid });
+      });
     }, AUTO_SAVE_INTERVAL);
     return () => {
       if (autoSaveTimerRef.current) clearInterval(autoSaveTimerRef.current);
     };
-  }, [doCloudSave, saveStatus]);
+  }, [doCloudSave, ensureProjectForAutoSave, saveStatus]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -564,8 +641,10 @@ export function DrawPage() {
       ? (styleSpec.color_preset as "pastel" | "vibrant" | "monochrome")
       : "pastel";
 
-    const isImageOnly = mode === "image_only";
-    const needsFullGen = isImageOnly || mode === "auto";
+    const isFree = mode === "free" || mode === "gpt_image";
+    const isTextEdit = mode === "text_edit";
+    const isImageOnly = mode === "image_only" || isFree;
+    const needsFullGen = isImageOnly || isTextEdit || mode === "auto";
     const backendMode = (needsFullGen ? "full_gen" : mode) as "fast" | "full_gen";
 
     const hasStyleFields = !!(styleSpec.visual_style || styleSpec.color_preset
@@ -583,6 +662,9 @@ export function DrawPage() {
         image_model: imageModel || undefined,
         component_image_model: componentGenModel || undefined,
         image_only: isImageOnly || undefined,
+        gpt_image: (mode === "gpt_image") || undefined,
+        free: isFree || undefined,
+        text_edit: isTextEdit || undefined,
         canvas_type: CANVAS_TYPE,
       },
       sketch_image_b64: sketchImage || undefined,
@@ -641,6 +723,8 @@ export function DrawPage() {
     mode === "fast" ? "bg-amber-100/80 text-amber-700"
     : mode === "full_gen" ? "bg-orange-100/80 text-orange-700"
     : mode === "image_only" ? "bg-rose-100/80 text-rose-700"
+    : mode === "free" || mode === "gpt_image" ? "bg-violet-100/80 text-violet-700"
+    : mode === "text_edit" ? "bg-teal-100/80 text-teal-700"
     : "bg-stone-100 text-stone-500";
 
   const handleSaveAsset = useCallback(

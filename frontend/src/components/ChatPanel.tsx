@@ -21,6 +21,8 @@ import {
   Layers,
   ImageIcon,
   Wand2,
+  Type,
+  Palette,
   Paperclip,
   FileUp,
 } from "lucide-react";
@@ -29,7 +31,7 @@ import ReactMarkdown from "react-markdown";
 import { parsePdfDocument, type ParsedPdfResult } from "../services/api";
 import { extractImages, stripComponentDescriptions } from "../services/projectApi";
 import { ASSISTANT_AVATAR_URL } from "../lib/avatarUrl";
-import { useT } from "../contexts/LanguageContext";
+import { useLanguage, useT } from "../contexts/LanguageContext";
 import type { TranslationKey } from "../i18n/zh";
 import type { AssetResultItem, ChatMessage, RegenContext, RegenResultItem } from "../hooks/useAssistant";
 import { useAssistant } from "../hooks/useAssistant";
@@ -50,6 +52,9 @@ export const MODE_LABEL_KEYS: Record<AssistantMode, TranslationKey> = {
   fast: "chat.mode.draft",
   full_gen: "chat.mode.fullGen",
   image_only: "chat.mode.imageOnly",
+  free: "chat.mode.free",
+  gpt_image: "chat.mode.gptImage",
+  text_edit: "chat.mode.textEdit",
 };
 
 const MODE_DESC_KEYS: Record<AssistantMode, TranslationKey> = {
@@ -57,6 +62,9 @@ const MODE_DESC_KEYS: Record<AssistantMode, TranslationKey> = {
   fast: "chat.mode.draftDesc",
   full_gen: "chat.mode.fullGenDesc",
   image_only: "chat.mode.imageOnlyDesc",
+  free: "chat.mode.freeDesc",
+  gpt_image: "chat.mode.gptImageDesc",
+  text_edit: "chat.mode.textEditDesc",
 };
 
 const MODE_ICONS: Record<AssistantMode, typeof Wand2> = {
@@ -64,9 +72,12 @@ const MODE_ICONS: Record<AssistantMode, typeof Wand2> = {
   fast: Zap,
   full_gen: Layers,
   image_only: ImageIcon,
+  free: Palette,
+  gpt_image: Palette,
+  text_edit: Type,
 };
 
-const DRAWIO_MODES: AssistantMode[] = ["auto", "fast", "image_only", "full_gen"];
+const DRAWIO_MODES: AssistantMode[] = ["auto", "fast", "image_only", "full_gen", "free", "text_edit"];
 const MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024;
 
 type PdfParseState =
@@ -115,6 +126,7 @@ export interface ChatPanelProps {
   onRequestIdChange?: (requestId: string | null) => void;
   editorRef?: React.RefObject<import("./DiagramEditor").DiagramEditorHandle>;
   onCanvasUpdate?: (xml: string, summary: string) => void;
+  chatExamples?: { chat_examples_zh?: string; chat_examples_en?: string };
 }
 
 // ── Main Component ──
@@ -151,6 +163,7 @@ export function ChatPanel({
   onRequestIdChange,
   editorRef,
   onCanvasUpdate,
+  chatExamples,
 }: ChatPanelProps) {
   const t = useT();
   const [input, setInput] = useState(text);
@@ -445,6 +458,27 @@ export function ChatPanel({
     textareaRef.current?.focus();
   }, [isLoading, isGenerating, pdfParse]);
 
+  const handleSelectAllPdfText = useCallback(() => {
+    if (pdfParse?.status !== "done") return;
+    const allText = pdfParse.result.markdown.trim();
+    if (!allText) return;
+
+    setPdfParse((prev) => (
+      prev?.status === "done"
+        ? { ...prev, selectedText: allText }
+        : prev
+    ));
+
+    const container = pdfTextRef.current;
+    if (!container) return;
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, [pdfParse]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -673,6 +707,14 @@ export function ChatPanel({
                       </span>
                       <button
                         type="button"
+                        onClick={handleSelectAllPdfText}
+                        disabled={!pdfParse.result.markdown.trim() || isActive}
+                        className="rounded-full border border-amber-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {t("chat.pdfSelectAll")}
+                      </button>
+                      <button
+                        type="button"
                         onClick={handleUsePdfSelection}
                         disabled={!pdfParse.selectedText.trim() || isActive}
                         className="rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm shadow-amber-200/60 transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
@@ -730,6 +772,7 @@ export function ChatPanel({
             mode={mode}
             onModeChange={onModeChange}
             onExampleClick={(text) => setInput(text)}
+            chatExamples={chatExamples}
           />
         )}
 
@@ -992,12 +1035,15 @@ function WelcomeHome({
   mode,
   onModeChange,
   onExampleClick,
+  chatExamples,
 }: {
   mode: AssistantMode;
   onModeChange: (m: AssistantMode) => void;
   onExampleClick?: (text: string) => void;
+  chatExamples?: { chat_examples_zh?: string; chat_examples_en?: string };
 }) {
   const t = useT();
+  const { locale } = useLanguage();
   return (
     <div className="flex flex-col items-center gap-4 py-6 text-center">
       <img
@@ -1055,19 +1101,31 @@ function WelcomeHome({
       </div>
 
       <div className="mt-3 flex w-full flex-col gap-2">
-        {(["chat.example1", "chat.example2"] as const).map((k) => {
-          const text = t(k);
-          return (
+        {(() => {
+          const raw = locale === "en" ? chatExamples?.chat_examples_en : chatExamples?.chat_examples_zh;
+          const items = raw
+            ? raw
+              .split(/\r?\n\s*\r?\n/g)
+              .map((s) => s.trim())
+              .filter(Boolean)
+            : (["chat.example1", "chat.example2"] as const).map((k) => t(k));
+          return items.map((text, idx) => (
             <button
-              key={k}
+              key={idx}
               type="button"
               onClick={() => onExampleClick?.(text)}
               className="rounded-lg bg-white px-4 py-2.5 text-[12px] leading-snug text-stone-500 shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all hover:shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:text-amber-600 active:scale-[0.97] cursor-pointer text-left"
+              title={text}
             >
-              {text}
+              <span
+                className="block overflow-hidden text-ellipsis"
+                style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}
+              >
+                {text}
+              </span>
             </button>
-          );
-        })}
+          ));
+        })()}
       </div>
     </div>
   );
@@ -1088,9 +1146,21 @@ function MessageBubble({
 }) {
   const t = useT();
   if (msg.role === "user") {
+    const example1 = t("chat.example1");
+    const example2 = t("chat.example2");
+    const normMsg = normalizeLoose(msg.content);
+    const normEx1 = normalizeLoose(example1);
+    const normEx2 = normalizeLoose(example2);
+    const isExample =
+      normMsg === normEx1 ||
+      normMsg === normEx2 ||
+      normMsg.startsWith(normEx1.slice(0, 16)) ||
+      normMsg.startsWith(normEx2.slice(0, 16));
+    const shouldCompact = isExample || (msg.content?.length ?? 0) > 140;
+    const userDisplay = shouldCompact ? truncateHalf(msg.content).replace(/\s+/g, " ") : msg.content;
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-xl rounded-tr-none bg-amber-100/90 text-on-surface px-4 py-2.5 text-sm leading-relaxed shadow-md">
+        <div className="max-w-[80%] rounded-xl rounded-tr-none bg-amber-100/90 text-on-surface px-4 py-2.5 text-sm leading-relaxed shadow-md" title={shouldCompact ? msg.content : undefined}>
           {msg.sketchImage && (
             <div className="mb-1.5 flex items-center gap-2 rounded-lg bg-amber-200/40 px-2 py-1">
               <img
@@ -1112,7 +1182,11 @@ function MessageBubble({
               </div>
             </div>
           )}
-          {msg.content}
+          {shouldCompact ? (
+            <span className="block truncate whitespace-nowrap">{userDisplay}</span>
+          ) : (
+            msg.content
+          )}
         </div>
       </div>
     );
@@ -1219,6 +1293,16 @@ function formatToolResult(raw: string, t: (key: TranslationKey, vars?: Record<st
   } catch {
     return raw.length > 100 ? raw.slice(0, 100) + "..." : raw;
   }
+}
+
+function truncateHalf(text: string): string {
+  const s = (text || "").trim();
+  if (s.length <= 24) return s;
+  return `${s.slice(0, Math.ceil(s.length / 2))}...`;
+}
+
+function normalizeLoose(text: string): string {
+  return (text || "").replace(/\s+/g, "").trim();
 }
 
 // ── PipelineMiniProgress ──

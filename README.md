@@ -12,11 +12,11 @@
 
 👋 join us on [WeChat](./docs/material/wechat_group_qr.jpg)
 
-
 </div>
 
 ## Features
 
+- 🆕 NanaDraw now supports the GPT Image 2 model as an image generation option
 - 📝 Paste method description text → auto-generate pipeline diagrams
 - 📎 Use one upload entry for images, PDFs, and text files; images become sketch references, while PDFs are parsed with MinerU for quoted-selection prompts
 - 🎨 Three creation modes: Draft, Generation, and Assembly

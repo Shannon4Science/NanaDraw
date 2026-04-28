@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import logging
 import re
@@ -66,6 +67,22 @@ class LLMService:
         self._base_url_override = value
 
     @property
+    def image_base_url(self) -> str:
+        raw = str(load_settings().get("image_base_url", "")).strip()
+        if not raw:
+            raw = self.base_url
+        return raw.strip().rstrip("/")
+
+    @property
+    def vision_base_url(self) -> str:
+        raw = str(load_settings().get("vision_base_url", "")).strip()
+        if not raw:
+            raw = str(load_settings().get("image_base_url", "")).strip()
+        if not raw:
+            raw = self.base_url
+        return raw.strip().rstrip("/")
+
+    @property
     def image_model(self) -> str:
         if self._image_model_override is not None:
             return self._image_model_override
@@ -82,6 +99,72 @@ class LLMService:
                 "LLM API key is not configured. Open application settings and set llm_api_key."
             )
         return key
+
+    def _require_image_api_key(self) -> str:
+        key = str(load_settings().get("image_api_key", "")).strip()
+        if not key:
+            # Fallback to general LLM API key if no separate image API key is provided
+            key = str(load_settings().get("llm_api_key", "")).strip()
+        if not key:
+            raise ValueError(
+                "Image API key is not configured. Open application settings and set image_api_key or llm_api_key."
+            )
+        return key
+
+    def _require_vision_api_key(self) -> str:
+        key = str(load_settings().get("vision_api_key", "")).strip()
+        if not key:
+            key = str(load_settings().get("image_api_key", "")).strip()
+        if not key:
+            key = str(load_settings().get("llm_api_key", "")).strip()
+        if not key:
+            raise ValueError(
+                "Vision API key is not configured. Open application settings and set vision_api_key, image_api_key, or llm_api_key."
+            )
+        return key
+
+    def _api_format(self) -> str:
+        fmt = str(load_settings().get("api_format", "auto") or "auto").strip()
+        if fmt not in {"auto", "gemini_native", "openai"}:
+            return "auto"
+        return fmt
+
+    @staticmethod
+    def _looks_openai_compatible_base_url(base_url: str) -> bool:
+        u = (base_url or "").strip().lower().rstrip("/")
+        return "/openai" in u or u.endswith("/v1")
+
+    @staticmethod
+    def _to_gemini_native_base_url(base_url: str) -> str:
+        u = (base_url or "").strip().rstrip("/")
+        lu = u.lower()
+        # OpenAI-compatible Gemini endpoints often look like:
+        #   https://generativelanguage.googleapis.com/v1beta/openai
+        # Normalize them to host root before appending /v1beta/models/...
+        for suffix in ("/v1beta/openai", "/v1/openai", "/openai", "/v1"):
+            if lu.endswith(suffix):
+                return u[: -len(suffix)]
+        return u
+
+    def _use_native_gemini_text(self) -> bool:
+        fmt = self._api_format()
+        if fmt == "gemini_native":
+            return True
+        if fmt == "openai":
+            return False
+        if self._looks_openai_compatible_base_url(self.base_url):
+            return False
+        return "gemini" in (self.model or "").lower()
+
+    def _use_native_gemini_image(self) -> bool:
+        fmt = self._api_format()
+        if fmt == "gemini_native":
+            return True
+        if fmt == "openai":
+            return False
+        if self._looks_openai_compatible_base_url(self.image_base_url):
+            return False
+        return "gemini" in (self.image_model or "").lower()
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -128,7 +211,13 @@ class LLMService:
                     )
                     await asyncio.sleep(delay)
                     continue
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    err_text = response.text[:400]
+                    raise httpx.HTTPStatusError(
+                        f"HTTP {response.status_code} from {url} model={model}: {err_text}",
+                        request=response.request,
+                        response=response,
+                    )
                 return response.json()
             except RETRYABLE_EXCEPTIONS as e:
                 elapsed_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
@@ -190,8 +279,13 @@ class LLMService:
                         await asyncio.sleep(delay)
                         continue
                     if response.status_code >= 400:
-                        await response.aread()
-                        response.raise_for_status()
+                        err_bytes = await response.aread()
+                        err_text = err_bytes.decode("utf-8", errors="ignore").strip()
+                        raise httpx.HTTPStatusError(
+                            f"HTTP {response.status_code} from {url} model={model}: {err_text[:400]}",
+                            request=response.request,
+                            response=response,
+                        )
 
                     return await self._collect_stream_lines(response)
             except RETRYABLE_EXCEPTIONS as e:
@@ -249,11 +343,210 @@ class LLMService:
             "model": model,
         }
 
-    async def _auth_headers(self) -> dict[str, str]:
+    async def _auth_headers(self, channel: str = "text") -> dict[str, str]:
+        if channel == "image":
+            key = self._require_image_api_key()
+        elif channel == "vision":
+            key = self._require_vision_api_key()
+        else:
+            key = self._require_api_key()
         return {
-            "Authorization": f"Bearer {self._require_api_key()}",
+            "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
         }
+
+    @staticmethod
+    def _build_gemini_body(
+        messages: list[dict],
+        *,
+        temperature: float = 0.1,
+        tools: list[dict] | None = None,
+        response_format: dict | None = None,
+    ) -> dict:
+        system_parts: list[dict] = []
+        contents: list[dict] = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content")
+            if role == "system":
+                if isinstance(content, str):
+                    system_parts.append({"text": content})
+                continue
+
+            if role == "tool":
+                fn_name = msg.get("name", "unknown")
+                raw = msg.get("content", "{}")
+                try:
+                    resp_data = json.loads(raw) if isinstance(raw, str) else raw
+                except (json.JSONDecodeError, TypeError):
+                    resp_data = {"result": raw}
+                contents.append({
+                    "role": "user",
+                    "parts": [{"functionResponse": {"name": fn_name, "response": resp_data}}],
+                })
+                continue
+
+            gemini_role = "model" if role == "assistant" else "user"
+            parts: list[dict] = []
+            tool_calls = msg.get("tool_calls") or []
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                fn_name = fn.get("name", "")
+                try:
+                    fn_args = json.loads(fn.get("arguments", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    fn_args = {}
+                parts.append({"functionCall": {"name": fn_name, "args": fn_args}})
+
+            if isinstance(content, str) and content:
+                parts.append({"text": content})
+            elif isinstance(content, list):
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("type") == "text":
+                        parts.append({"text": item.get("text", "")})
+                    elif item.get("type") == "image_url":
+                        url = item.get("image_url", {}).get("url", "")
+                        if url.startswith("data:") and "," in url:
+                            header, b64_data = url.split(",", 1)
+                            mime_type = "image/png"
+                            if ":" in header and ";" in header:
+                                mime_type = header.split(":", 1)[1].split(";", 1)[0]
+                            parts.append({"inlineData": {"mimeType": mime_type, "data": b64_data}})
+                        elif url:
+                            parts.append({"text": f"[image: {url}]"})
+
+            if parts:
+                contents.append({"role": gemini_role, "parts": parts})
+
+        body: dict = {"contents": contents}
+        if system_parts:
+            body["systemInstruction"] = {"parts": system_parts}
+        gen_config: dict = {"temperature": temperature}
+        if response_format and response_format.get("type") == "json_object":
+            gen_config["responseMimeType"] = "application/json"
+        body["generationConfig"] = gen_config
+
+        if tools:
+            fn_decls = []
+            for tool in tools:
+                if tool.get("type") != "function":
+                    continue
+                fn = tool.get("function", {})
+                decl: dict = {"name": fn.get("name", ""), "description": fn.get("description", "")}
+                params = fn.get("parameters")
+                if params:
+                    decl["parameters"] = params
+                fn_decls.append(decl)
+            if fn_decls:
+                body["tools"] = [{"functionDeclarations": fn_decls}]
+        return body
+
+    @staticmethod
+    async def _collect_gemini_stream(response: httpx.Response) -> dict:
+        text_parts: list[str] = []
+        tool_calls: list[dict] = []
+        finish_reason: str | None = None
+        model = ""
+        tc_index = 0
+        async for line in response.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            payload = line[6:].strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            model = chunk.get("modelVersion", model)
+            for candidate in chunk.get("candidates", []):
+                for part in candidate.get("content", {}).get("parts", []):
+                    if part.get("thought"):
+                        continue
+                    if "text" in part and part["text"]:
+                        text_parts.append(part["text"])
+                    if "functionCall" in part:
+                        fc = part["functionCall"]
+                        tool_calls.append({
+                            "id": f"call_{tc_index}",
+                            "type": "function",
+                            "function": {
+                                "name": fc.get("name", ""),
+                                "arguments": json.dumps(fc.get("args", {}), ensure_ascii=False),
+                            },
+                        })
+                        tc_index += 1
+                raw_reason = candidate.get("finishReason")
+                if raw_reason and raw_reason != "FINISH_REASON_UNSPECIFIED":
+                    reason_map = {"STOP": "stop", "MAX_TOKENS": "length", "SAFETY": "content_filter"}
+                    finish_reason = reason_map.get(raw_reason, str(raw_reason).lower())
+
+        message: dict = {"role": "assistant", "content": "".join(text_parts)}
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        return {"choices": [{"message": message, "finish_reason": finish_reason}], "model": model}
+
+    async def _post_gemini_stream(
+        self,
+        body: dict,
+        *,
+        model: str,
+        channel: str = "text",
+        read_timeout: float = STREAM_READ_TIMEOUT,
+        max_retries: int = LLM_MAX_RETRIES,
+    ) -> dict:
+        timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=10.0)
+        if channel == "image":
+            base_url = self.image_base_url
+            api_key = self._require_image_api_key()
+        else:
+            base_url = self.base_url
+            api_key = self._require_api_key()
+        native_base = self._to_gemini_native_base_url(base_url)
+        url = f"{native_base}/v1beta/models/{model}:streamGenerateContent?alt=sse&key={api_key}"
+
+        last_err: Exception | None = None
+        for attempt in range(max_retries):
+            is_last = attempt == max_retries - 1
+            t0 = asyncio.get_event_loop().time()
+            try:
+                async with self.client.stream(
+                    "POST",
+                    url,
+                    json=body,
+                    headers={"Content-Type": "application/json"},
+                    timeout=timeout,
+                ) as response:
+                    elapsed_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
+                    if response.status_code in RETRYABLE_STATUS_CODES:
+                        await response.aread()
+                        last_err = httpx.HTTPStatusError(
+                            f"HTTP {response.status_code}",
+                            request=response.request,
+                            response=response,
+                        )
+                        if is_last:
+                            logger.warning(
+                                "%s[gemini-stream] HTTP %d from %s model=%s (%dms) — all %d attempts exhausted",
+                                self.log_tag, response.status_code, native_base, model, elapsed_ms, max_retries,
+                            )
+                            break
+                        delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                        await asyncio.sleep(delay)
+                        continue
+                    if response.status_code >= 400:
+                        await response.aread()
+                        response.raise_for_status()
+                    return await self._collect_gemini_stream(response)
+            except RETRYABLE_EXCEPTIONS as e:
+                last_err = e
+                if is_last:
+                    break
+                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                await asyncio.sleep(delay)
+        raise last_err  # type: ignore[misc]
 
     async def chat(
         self,
@@ -281,11 +574,59 @@ class LLMService:
         if read_timeout is not None:
             stream_kw["read_timeout"] = read_timeout
 
-        data = await self._post_stream_with_retry(
-            f"{self.base_url}/chat/completions",
-            body, await self._auth_headers(),
-            **stream_kw,
-        )
+        use_native = self._use_native_gemini_text()
+        try:
+            if use_native:
+                gem_body = self._build_gemini_body(
+                    messages,
+                    temperature=temperature,
+                    response_format=body.get("response_format"),
+                )
+                data = await self._post_gemini_stream(
+                    gem_body,
+                    model=self.model,
+                    channel="text",
+                    read_timeout=stream_kw.get("read_timeout", STREAM_READ_TIMEOUT),
+                )
+            else:
+                data = await self._post_stream_with_retry(
+                    f"{self.base_url}/chat/completions",
+                    body, await self._auth_headers(channel="text"),
+                    **stream_kw,
+                )
+        except httpx.HTTPStatusError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            retried = False
+            if response_format == "json" and status == 400 and not use_native:
+                logger.warning(
+                    "%schat got HTTP 400 with response_format=json, retrying without response_format",
+                    self.log_tag,
+                )
+                retry_body = dict(body)
+                retry_body.pop("response_format", None)
+                data = await self._post_stream_with_retry(
+                    f"{self.base_url}/chat/completions",
+                    retry_body, await self._auth_headers(channel="text"),
+                    **stream_kw,
+                )
+                retried = True
+            # Some OpenAI-compatible providers reject streaming payloads with 400.
+            if status == 400 and not use_native and not retried:
+                logger.warning(
+                    "%schat stream got HTTP 400, retrying non-stream /chat/completions for compatibility",
+                    self.log_tag,
+                )
+                ns_body = dict(body)
+                ns_body.pop("stream", None)
+                data = await self._post_with_retry(
+                    f"{self.base_url}/chat/completions",
+                    ns_body,
+                    await self._auth_headers(channel="text"),
+                    timeout=TIMEOUT_DEFAULT,
+                )
+            else:
+                if not retried:
+                    raise
         content = data["choices"][0]["message"]["content"]
         return content or ""
 
@@ -302,11 +643,47 @@ class LLMService:
             "tools": tools,
             "temperature": temperature,
         }
-        data = await self._post_with_retry(
-            f"{self.base_url}/chat/completions",
-            body, await self._auth_headers(),
-            timeout=TIMEOUT_DEFAULT,
-        )
+        if self._use_native_gemini_text():
+            gem_body = self._build_gemini_body(
+                messages,
+                temperature=temperature,
+                tools=tools,
+            )
+            try:
+                data = await self._post_gemini_stream(
+                    gem_body,
+                    model=self.model,
+                    channel="text",
+                    read_timeout=STREAM_READ_TIMEOUT,
+                )
+            except httpx.HTTPStatusError as e:
+                if getattr(getattr(e, "response", None), "status_code", None) == 400:
+                    # Fallback to OpenAI-compatible non-stream tool call.
+                    data = await self._post_with_retry(
+                        f"{self.base_url}/chat/completions",
+                        body,
+                        await self._auth_headers(channel="text"),
+                        timeout=TIMEOUT_DEFAULT,
+                    )
+                else:
+                    raise
+        else:
+            try:
+                data = await self._post_stream_with_retry(
+                    f"{self.base_url}/chat/completions",
+                    body, await self._auth_headers(channel="text"),
+                    read_timeout=STREAM_READ_TIMEOUT,
+                )
+            except httpx.HTTPStatusError as e:
+                if getattr(getattr(e, "response", None), "status_code", None) == 400:
+                    data = await self._post_with_retry(
+                        f"{self.base_url}/chat/completions",
+                        body,
+                        await self._auth_headers(channel="text"),
+                        timeout=TIMEOUT_DEFAULT,
+                    )
+                else:
+                    raise
         return data["choices"][0]["message"]
 
     async def chat_json(
@@ -372,11 +749,58 @@ class LLMService:
         if read_timeout is not None:
             stream_kw["read_timeout"] = read_timeout
 
-        data = await self._post_stream_with_retry(
-            f"{self.base_url}/chat/completions",
-            body, await self._auth_headers(),
-            **stream_kw,
-        )
+        use_native = self._use_native_gemini_text()
+        try:
+            if use_native:
+                gem_body = self._build_gemini_body(
+                    messages,
+                    temperature=temperature,
+                    response_format=body.get("response_format"),
+                )
+                data = await self._post_gemini_stream(
+                    gem_body,
+                    model=self.model,
+                    channel="text",
+                    read_timeout=stream_kw.get("read_timeout", STREAM_READ_TIMEOUT),
+                )
+            else:
+                data = await self._post_stream_with_retry(
+                    f"{self.vision_base_url}/chat/completions",
+                    body, await self._auth_headers(channel="vision"),
+                    **stream_kw,
+                )
+        except httpx.HTTPStatusError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            retried = False
+            if response_format == "json" and status == 400 and not use_native:
+                logger.warning(
+                    "%schat_with_image got HTTP 400 with response_format=json, retrying without response_format",
+                    self.log_tag,
+                )
+                retry_body = dict(body)
+                retry_body.pop("response_format", None)
+                data = await self._post_stream_with_retry(
+                    f"{self.vision_base_url}/chat/completions",
+                    retry_body, await self._auth_headers(channel="vision"),
+                    **stream_kw,
+                )
+                retried = True
+            if status == 400 and not use_native and not retried:
+                logger.warning(
+                    "%schat_with_image stream got HTTP 400, retrying non-stream /chat/completions",
+                    self.log_tag,
+                )
+                ns_body = dict(body)
+                ns_body.pop("stream", None)
+                data = await self._post_with_retry(
+                    f"{self.vision_base_url}/chat/completions",
+                    ns_body,
+                    await self._auth_headers(channel="vision"),
+                    timeout=TIMEOUT_DEFAULT,
+                )
+            else:
+                if not retried:
+                    raise
         content = data["choices"][0]["message"]["content"]
         if isinstance(content, list):
             text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
@@ -447,11 +871,41 @@ class LLMService:
 
         last_err: Exception | None = None
         for attempt in range(JSON_PARSE_RETRIES):
-            data = await self._post_stream_with_retry(
-                f"{self.base_url}/chat/completions",
-                body, await self._auth_headers(),
-                **stream_kw,
-            )
+            try:
+                if self._use_native_gemini_text():
+                    gem_body = self._build_gemini_body(
+                        messages,
+                        temperature=temperature,
+                        response_format=body.get("response_format"),
+                    )
+                    data = await self._post_gemini_stream(
+                        gem_body,
+                        model=self.model,
+                        channel="text",
+                        read_timeout=stream_kw.get("read_timeout", STREAM_READ_TIMEOUT),
+                    )
+                else:
+                    data = await self._post_stream_with_retry(
+                        f"{self.vision_base_url}/chat/completions",
+                        body, await self._auth_headers(channel="vision"),
+                        **stream_kw,
+                    )
+            except httpx.HTTPStatusError as e:
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status == 400 and "response_format" in body and not self._use_native_gemini_text():
+                    logger.warning(
+                        "%schat_with_images_json got HTTP 400 with response_format=json, retrying without response_format",
+                        self.log_tag,
+                    )
+                    retry_body = dict(body)
+                    retry_body.pop("response_format", None)
+                    data = await self._post_stream_with_retry(
+                        f"{self.vision_base_url}/chat/completions",
+                        retry_body, await self._auth_headers(channel="vision"),
+                        **stream_kw,
+                    )
+                else:
+                    raise
             content = data["choices"][0]["message"]["content"]
             if isinstance(content, list):
                 text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
@@ -510,6 +964,36 @@ class LLMService:
         aspect_ratio: str | None = None,
         image_size: str | None = None,
     ) -> str:
+        model_lower = (self.image_model or "").lower()
+        if model_lower.startswith("gpt-image"):
+            try:
+                return await self._generate_image_via_images_endpoint(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    reference_image_b64=reference_image_b64,
+                )
+            except httpx.HTTPStatusError as e:
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                # Some OpenAI-compatible gateways reject /images/* for specific routes or auth
+                # but still support image generation through /chat/completions.
+                if status in {400, 401, 403, 404, 405, 415, 422, 500}:
+                    logger.warning(
+                        "%s/images/generations rejected (HTTP %s), fallback to /chat/completions",
+                        self.log_tag,
+                        status,
+                    )
+                else:
+                    raise
+        if self._use_native_gemini_image():
+            try:
+                return await self._generate_image_gemini_native(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    reference_image_b64=reference_image_b64,
+                    temperature=temperature,
+                )
+            except Exception as e:
+                logger.warning("%sGemini native image generation failed, fallback to OpenAI-compatible: %s", self.log_tag, e)
         if reference_image_b64:
             user_content: list[dict] | str = [
                 {"type": "text", "text": user_prompt},
@@ -545,8 +1029,8 @@ class LLMService:
             f" image_config={body['image_config']}" if "image_config" in body else "",
         )
         data = await self._post_with_retry(
-            f"{self.base_url}/chat/completions",
-            body, await self._auth_headers(),
+            f"{self.image_base_url}/chat/completions",
+            body, await self._auth_headers(channel="image"),
             timeout=TIMEOUT_IMAGE_GEN,
             max_retries=LLM_MAX_RETRIES,
         )
@@ -557,6 +1041,136 @@ class LLMService:
                 f"Content preview: {str(data.get('choices', [{}])[0].get('message', {}).get('content', ''))[:200]}"
             )
         return image_b64
+
+    def _has_explicit_image_channel(self) -> bool:
+        settings_data = load_settings()
+        return bool(
+            str(settings_data.get("image_base_url", "")).strip()
+            or str(settings_data.get("image_api_key", "")).strip()
+        )
+
+    async def _generate_image_via_images_endpoint(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        reference_image_b64: str | None = None,
+        size: str = "1024x1024",
+        quality: str = "high",
+    ) -> str:
+        url = f"{self.image_base_url}/images/generations"
+        prompt = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
+        if reference_image_b64:
+            prompt = (
+                f"{prompt}\n\n"
+                "[Reference image is provided. Preserve its style and layout intent as much as possible.]"
+            )
+        body = {
+            "model": self.image_model,
+            "prompt": prompt,
+            "n": 1,
+            "size": size,
+            "quality": quality,
+        }
+        headers = await self._auth_headers(channel="image")
+        response = await self.client.post(
+            url,
+            json=body,
+            headers=headers,
+            timeout=TIMEOUT_IMAGE_GEN,
+        )
+
+        if response.status_code == 401:
+            auth = headers.get("Authorization", "")
+            token = auth.split(" ", 1)[1] if auth.lower().startswith("bearer ") else ""
+            if token:
+                alt_headers = {
+                    "Content-Type": "application/json",
+                    "api-key": token,
+                    "x-api-key": token,
+                }
+                logger.warning(
+                    "%s/images/generations 401 with bearer auth, retrying once with api-key headers",
+                    self.log_tag,
+                )
+                alt_resp = await self.client.post(
+                    url,
+                    json=body,
+                    headers=alt_headers,
+                    timeout=TIMEOUT_IMAGE_GEN,
+                )
+                if alt_resp.status_code < 400:
+                    response = alt_resp
+
+        if response.status_code >= 400:
+            text = response.text[:400]
+            raise httpx.HTTPStatusError(
+                f"HTTP {response.status_code} from {url} model={self.image_model}: {text}",
+                request=response.request,
+                response=response,
+            )
+
+        data = response.json()
+
+        data_list = data.get("data", [])
+        if not data_list:
+            raise ValueError("No image data found in /images/generations response")
+
+        item = data_list[0]
+        b64 = item.get("b64_json")
+        if b64:
+            return b64
+
+        image_url = item.get("url", "")
+        if image_url:
+            img_resp = await self.client.get(image_url, timeout=httpx.Timeout(30.0))
+            img_resp.raise_for_status()
+            return base64.b64encode(img_resp.content).decode()
+
+        raise ValueError("No b64_json/url found in /images/generations response")
+
+    async def _generate_image_gemini_native(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        reference_image_b64: str | None = None,
+        temperature: float = 0.8,
+    ) -> str:
+        parts: list[dict] = [{"text": f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt}]
+        if reference_image_b64:
+            parts.append({
+                "inline_data": {
+                    "mime_type": "image/png",
+                    "data": reference_image_b64,
+                },
+            })
+
+        body: dict = {
+            "contents": [{"parts": parts}],
+            "generationConfig": {
+                "temperature": temperature,
+                "responseModalities": ["TEXT", "IMAGE"],
+            },
+        }
+        native_base = self._to_gemini_native_base_url(self.image_base_url)
+        api_key = self._require_image_api_key()
+        url = f"{native_base}/v1beta/models/{self.image_model}:generateContent?key={api_key}"
+        response = await self.client.post(
+            url,
+            json=body,
+            headers={"Content-Type": "application/json"},
+            timeout=TIMEOUT_IMAGE_GEN,
+        )
+        response.raise_for_status()
+        result = response.json()
+        for cand in result.get("candidates", []):
+            for part in cand.get("content", {}).get("parts", []):
+                inline = part.get("inline_data") or part.get("inlineData") or {}
+                b64 = inline.get("data", "")
+                if b64:
+                    return b64
+        raise ValueError("No image data in Gemini native response")
 
     def _extract_image_from_response(self, data: dict) -> str | None:
         content = data["choices"][0]["message"]["content"]
@@ -630,7 +1244,7 @@ class LLMService:
             await self._client.aclose()
 
     async def list_models(self) -> list[str]:
-        headers = await self._auth_headers()
+        headers = await self._auth_headers(channel="text")
         response = await self.client.get(
             f"{self.base_url}/models",
             headers=headers,

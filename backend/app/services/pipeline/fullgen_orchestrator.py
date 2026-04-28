@@ -30,6 +30,11 @@ from app.prompts.fullgen_prompts import (
     BLUEPRINT_STYLE_SPEC_ADDON,
     IMAGE_ONLY_SYSTEM,
 )
+from app.prompts.text_edit_prompts import (
+    TEXT_EDIT_EXTRACT_SYSTEM,
+    TEXT_EDIT_EXTRACT_USER,
+    TEXT_EDIT_REMOVE_TEXT_PROMPT,
+)
 from app.schemas.paper import (
     ComponentCategory,
     DiagramBlueprint,
@@ -71,8 +76,15 @@ IMAGE_ONLY_STEPS = [
     {"id": "result_image", "name": "结果图片生成"},
 ]
 
-STEP_ORDER = [s["id"] for s in FULL_GEN_STEPS]
+FREE_MODE_STEPS = [
+    {"id": "result_image", "name": "图片生成"},
+]
 
+TEXT_EDIT_STEPS = [
+    {"id": "planning", "name": "文本理解与规划"},
+    {"id": "result_image", "name": "背景图片生成"},
+    {"id": "text_extraction", "name": "文字提取与组装"},
+]
 
 def _sse(event: str, data: dict) -> str:
     payload = json.dumps(data, ensure_ascii=False)
@@ -104,6 +116,16 @@ class FullGenOrchestrator:
         self._running: bool = False
         self._started_at: float = 0.0
         self.nana_soul: str | None = nana_soul
+
+    @staticmethod
+    def _extract_step_error(events: list[str], fallback: str = "Unknown error") -> str:
+        import re as _re
+        for e in events:
+            if '"step_error"' in e:
+                m = _re.search(r'"error"\s*:\s*"([^"]*)"', e)
+                if m:
+                    return m.group(1)
+        return fallback
 
     def _update_tag(self) -> None:
         """Rebuild log tag with current model info."""
@@ -383,19 +405,121 @@ class FullGenOrchestrator:
         if request.style_spec:
             self.style_spec = request.style_spec
 
-        start_idx = 0
-        if resume_from and resume_from in STEP_ORDER:
-            start_idx = STEP_ORDER.index(resume_from)
-
         image_only = getattr(request.options, "image_only", False) if request.options else False
-        active_steps = IMAGE_ONLY_STEPS if image_only else FULL_GEN_STEPS
+        is_free = (
+            getattr(request.options, "free", False)
+            or getattr(request.options, "gpt_image", False)
+        ) if request.options else False
+        is_text_edit = getattr(request.options, "text_edit", False) if request.options else False
+        if is_free:
+            active_steps = FREE_MODE_STEPS
+            pipeline_mode = "free"
+        elif is_text_edit:
+            active_steps = TEXT_EDIT_STEPS
+            pipeline_mode = "text_edit"
+        elif image_only:
+            active_steps = IMAGE_ONLY_STEPS
+            pipeline_mode = "image_only"
+        else:
+            active_steps = FULL_GEN_STEPS
+            pipeline_mode = "full_gen"
+
+        step_order = [s["id"] for s in active_steps]
+        start_idx = 0
+        if resume_from:
+            if resume_from in step_order:
+                start_idx = step_order.index(resume_from)
+            else:
+                logger.warning(
+                    "%s Unknown resume_from=%s for mode=%s, fallback to full run",
+                    self.tag, resume_from, pipeline_mode,
+                )
 
         yield _sse("pipeline_info", {
             "steps": active_steps,
             "total": len(active_steps),
             "request_id": self.request_id,
-            "mode": "image_only" if image_only else "full_gen",
+            "mode": pipeline_mode,
         })
+
+        # ── Free mode: single-step direct image generation ──
+        if is_free:
+            logger.info("%s Step 1/1 free_image_gen started", self.tag)
+            yield _sse("step_start", {"step_id": "result_image"})
+            ref_b64, events = await self._step_free_image_gen(
+                request.text,
+                step_id="result_image",
+            )
+            for evt in events:
+                yield evt
+            if ref_b64 is None:
+                logger.error("%s Step 1/1 free_image_gen FAILED", self.tag)
+                yield _sse("error", {"message": self._extract_step_error(events, "Image generation failed")})
+                yield _sse("close", {})
+                return
+            self.ref_image_b64 = ref_b64
+            elapsed = int((time.monotonic() - pipeline_t0) * 1000)
+            logger.info("%s free mode pipeline completed (total %dms)", self.tag, elapsed)
+            yield _sse("result", {"image": self.ref_image_b64})
+            yield _sse("close", {})
+            return
+
+        # ── Text-edit mode: image + editable text overlay ──
+        if is_text_edit:
+            logger.info("%s Step 1/3 planning started (text_edit)", self.tag)
+            yield _sse("step_start", {"step_id": "planning"})
+            plan_result, plan_meta = await self._step_planning(request, style_ref)
+            if plan_result is None:
+                yield plan_meta
+                logger.error("%s Step 1/3 planning FAILED (text_edit)", self.tag)
+                yield _sse("close", {})
+                return
+            self.plan = plan_result
+            self.plan_prompts = plan_meta
+            self._save_to_redis()
+            for evt in self._emit_planning_result(plan_result, plan_meta):
+                yield evt
+
+            logger.info("%s Step 2/3 result_image started (text_edit)", self.tag)
+            yield _sse("step_start", {"step_id": "result_image"})
+            ref_b64, img_events = await self._step_image_gen(
+                plan_result,
+                request,
+                style_ref=style_ref,
+                step_id="result_image",
+                sketch_image_b64=getattr(request, "sketch_image_b64", None),
+                image_only=True,
+            )
+            for evt in img_events:
+                yield evt
+            if ref_b64 is None:
+                logger.error("%s Step 2/3 result_image FAILED (text_edit)", self.tag)
+                yield _sse("error", {"message": self._extract_step_error(img_events, "Image generation failed")})
+                yield _sse("close", {})
+                return
+            self.ref_image_b64 = ref_b64
+            self._save_to_redis()
+
+            logger.info("%s Step 3/3 text_extraction started (text_edit)", self.tag)
+            yield _sse("step_start", {"step_id": "text_extraction"})
+            xml, text_events = await self._step_text_edit_assembly(
+                ref_b64,
+                plan_result,
+                step_id="text_extraction",
+            )
+            for evt in text_events:
+                yield evt
+            if xml is None:
+                logger.error("%s Step 3/3 text_extraction FAILED (text_edit)", self.tag)
+                yield _sse("error", {"message": self._extract_step_error(text_events, "Text extraction failed")})
+                yield _sse("close", {})
+                return
+
+            elapsed = int((time.monotonic() - pipeline_t0) * 1000)
+            logger.info("%s text_edit pipeline completed (total %dms)", self.tag, elapsed)
+            yield _sse("result", {"xml": xml})
+            yield _sse("close", {})
+            return
 
         if start_idx > 0:
             missing = self._check_resume_prerequisites(start_idx)
@@ -777,6 +901,135 @@ class FullGenOrchestrator:
         events.append(_sse("reference_image", {"image": image_b64}))
         return image_b64, events
 
+    async def _step_free_image_gen(
+        self,
+        request_text: str,
+        step_id: str = "result_image",
+    ) -> tuple[str | None, list[str]]:
+        """Free mode: generate image directly from conversation text."""
+        events: list[str] = []
+        t0 = time.monotonic()
+
+        system_prompt = (
+            "You are an expert illustration designer. "
+            "Generate a clean, modern, publication-quality illustration. "
+            "Use clear labels, professional color scheme, and well-organized layout."
+        )
+        try:
+            image_b64 = await self.llm.generate_image(
+                system_prompt=system_prompt,
+                user_prompt=request_text,
+            )
+        except Exception as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.exception("%s Free mode image generation failed", self.tag)
+            events.append(_sse("step_error", {
+                "step_id": step_id, "elapsed_ms": elapsed, "error": str(e),
+            }))
+            return None, events
+
+        elapsed = int((time.monotonic() - t0) * 1000)
+        events.append(_sse("step_complete", {
+            "step_id": step_id,
+            "elapsed_ms": elapsed,
+            "artifact_type": "reference_image",
+            "artifact": {"size_bytes": len(image_b64), "status": "generated"},
+            "prompts": {"system": system_prompt, "user": request_text},
+        }))
+        events.append(_sse("reference_image", {"image": image_b64}))
+        return image_b64, events
+
+    async def _step_text_edit_assembly(
+        self,
+        background_b64: str,
+        plan: DiagramPlan,
+        step_id: str = "text_extraction",
+    ) -> tuple[str | None, list[str]]:
+        """Text-edit mode: extract text from image and overlay editable text cells."""
+        events: list[str] = []
+        t0 = time.monotonic()
+
+        context = f"Title: {plan.title}\nLayout: {plan.layout}"
+        if plan.steps:
+            context += f"\nSteps: {', '.join(s.label for s in plan.steps[:10])}"
+        elif plan.elements:
+            context += f"\nElements: {', '.join(e.label for e in plan.elements[:10])}"
+
+        try:
+            _img = ImageProcessor.b64_to_image(background_b64)
+            real_w, real_h = _img.size
+            scale = 1200 / max(real_w, real_h)
+            canvas_w = int(real_w * scale)
+            canvas_h = int(real_h * scale)
+        except Exception:
+            real_w, real_h = 1200, 800
+            canvas_w, canvas_h = 1200, 800
+
+        try:
+            result_text = await self.llm.chat_with_image(
+                system_prompt=TEXT_EDIT_EXTRACT_SYSTEM,
+                user_text=TEXT_EDIT_EXTRACT_USER.format(
+                    context=context,
+                    image_w=real_w,
+                    image_h=real_h,
+                    canvas_w=canvas_w,
+                    canvas_h=canvas_h,
+                ),
+                image_b64=background_b64,
+                temperature=0.3,
+            )
+        except Exception as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.exception("%s Text extraction VLM failed", self.tag)
+            events.append(_sse("step_error", {
+                "step_id": step_id, "elapsed_ms": elapsed, "error": str(e),
+            }))
+            return None, events
+
+        text_data = _parse_json_safe(result_text)
+        if not text_data or "text_components" not in text_data:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            events.append(_sse("step_error", {
+                "step_id": step_id,
+                "elapsed_ms": elapsed,
+                "error": "Failed to parse text extraction result",
+            }))
+            return None, events
+
+        text_comps = text_data.get("text_components", [])
+        clean_bg_b64 = background_b64
+        try:
+            clean_bg_b64 = await self.llm.generate_image(
+                system_prompt="You are an expert image editor.",
+                user_prompt=TEXT_EDIT_REMOVE_TEXT_PROMPT,
+                reference_image_b64=background_b64,
+                asset_logical_group="result_image",
+                asset_logical_id="text_free_bg",
+            )
+        except Exception as e:
+            logger.warning("%s Text-free background generation failed, fallback to original: %s", self.tag, e)
+
+        xml = _build_text_edit_xml(clean_bg_b64, text_comps, canvas_w, canvas_h)
+        elapsed = int((time.monotonic() - t0) * 1000)
+        events.append(_sse("step_complete", {
+            "step_id": step_id,
+            "elapsed_ms": elapsed,
+            "artifact_type": "xml",
+            "artifact": {"text_count": len(text_comps)},
+            "prompts": {
+                "system": TEXT_EDIT_EXTRACT_SYSTEM[:200],
+                "user": TEXT_EDIT_EXTRACT_USER.format(
+                    context=context,
+                    image_w=real_w,
+                    image_h=real_h,
+                    canvas_w=canvas_w,
+                    canvas_h=canvas_h,
+                )[:200],
+                "bg_removal": TEXT_EDIT_REMOVE_TEXT_PROMPT[:200],
+            },
+        }))
+        return xml, events
+
     async def _step_blueprint_extract(
         self, ref_image: str, plan: DiagramPlan, *, extract_style: bool = False,
     ) -> tuple[DiagramBlueprint | None, StyleSpec | None, list[str]]:
@@ -891,3 +1144,101 @@ class FullGenOrchestrator:
 
     async def cleanup(self) -> None:
         await self.llm.close()
+
+
+def _parse_json_safe(text: str) -> dict | None:
+    """Best-effort JSON extraction from LLM output."""
+    import re
+
+    text = text.strip()
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if m:
+        text = m.group(1).strip()
+    if text.startswith("{"):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def _build_text_edit_xml(
+    background_b64: str,
+    text_components: list[dict],
+    canvas_w: int = 1200,
+    canvas_h: int = 800,
+) -> str:
+    """Build draw.io XML with image background and editable text overlays."""
+    from xml.sax.saxutils import escape
+    from app.services.pipeline.xml_assembler import _img_html
+
+    cells: list[str] = []
+    cell_id = 2
+    bg_value = _img_html(background_b64)
+    bg_style = (
+        "html=1;overflow=fill;whiteSpace=wrap;"
+        "verticalAlign=middle;align=center;"
+        "fillColor=none;strokeColor=none;"
+    )
+    cells.append(
+        f'      <mxCell id="{cell_id}" value="{bg_value}" style="{bg_style}" vertex="1" parent="1">'
+        f'<mxGeometry width="{canvas_w}" height="{canvas_h}" as="geometry"/></mxCell>'
+    )
+    cell_id += 1
+
+    for comp in text_components:
+        bbox = comp.get("bbox", {})
+        raw_x = bbox.get("x", 0) * canvas_w / 100
+        raw_y = bbox.get("y", 0) * canvas_h / 100
+        raw_w = max(bbox.get("w", 10) * canvas_w / 100, 20)
+        raw_h = max(bbox.get("h", 5) * canvas_h / 100, 14)
+        pad_w = raw_w * 0.10
+        pad_h = raw_h * 0.10
+        x = max(0, raw_x - pad_w / 2)
+        y = max(0, raw_y - pad_h / 2)
+        w = raw_w + pad_w
+        h = raw_h + pad_h
+
+        style_data = comp.get("style", {})
+        font_size = style_data.get("fontSize", 14)
+        font_color = style_data.get("fontColor", "#333333")
+        font_style = style_data.get("fontStyle", 0)
+        align = style_data.get("align", "center")
+        style_str = ";".join([
+            "text",
+            "html=1",
+            "whiteSpace=wrap",
+            f"fontSize={font_size}",
+            f"fontColor={font_color}",
+            f"fontStyle={font_style}",
+            f"align={align}",
+            "verticalAlign=middle",
+            "overflow=visible",
+            "fillColor=none",
+            "strokeColor=none",
+        ]) + ";"
+        label = escape(comp.get("content", ""))
+        cells.append(
+            f'      <mxCell id="{cell_id}" value="{label}" style="{style_str}" vertex="1" parent="1">'
+            f'<mxGeometry x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" as="geometry"/></mxCell>'
+        )
+        cell_id += 1
+
+    cells_str = "\n".join(cells)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<mxGraphModel>\n'
+        "  <root>\n"
+        '    <mxCell id="0"/>\n'
+        '    <mxCell id="1" parent="0"/>\n'
+        f"{cells_str}\n"
+        "  </root>\n"
+        "</mxGraphModel>"
+    )

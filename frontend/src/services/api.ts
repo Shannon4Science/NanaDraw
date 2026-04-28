@@ -3,6 +3,7 @@ import { tStandalone as t } from "../contexts/LanguageContext";
 const PATH_PREFIX = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API_BASE = `${PATH_PREFIX}/api/v1`;
 const SETTINGS_API = `${PATH_PREFIX}/api/v1/settings`;
+const FALLBACK_API_BASE = "/api/v1";
 
 export async function fetchNanaSoul(): Promise<string> {
   const res = await fetch(SETTINGS_API);
@@ -257,10 +258,18 @@ export interface ParsedPdfResult {
   source: "mineru";
 }
 
+async function fetchDocumentsApi(path: string, init?: RequestInit): Promise<Response> {
+  const primary = await fetch(`${API_BASE}${path}`, init);
+  const contentType = (primary.headers.get("content-type") || "").toLowerCase();
+  const shouldFallback = primary.status === 404 || contentType.includes("text/html");
+  if (!shouldFallback) return primary;
+  return fetch(`${FALLBACK_API_BASE}${path}`, init);
+}
+
 export async function parsePdfDocument(file: File): Promise<ParsedPdfResult> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${API_BASE}/documents/parse-pdf`, {
+  const res = await fetchDocumentsApi("/documents/parse-pdf", {
     method: "POST",
     body: form,
   });

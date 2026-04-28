@@ -1,5 +1,6 @@
 """Diagram generation endpoint — in-process SSE (no queue)."""
 
+import json
 import logging
 import time
 import uuid
@@ -20,7 +21,12 @@ router = APIRouter()
 def _use_fullgen_orchestrator(request: GenerateRequest) -> bool:
     if request.mode == GenerateMode.FULL_GEN:
         return True
-    if request.options and request.options.image_only:
+    if request.options and (
+        request.options.image_only
+        or request.options.free
+        or request.options.gpt_image
+        or request.options.text_edit
+    ):
         return True
     return False
 
@@ -70,6 +76,13 @@ async def generate_diagram(
         except GeneratorExit:
             elapsed = int((time.monotonic() - t0) * 1000)
             logger.info("[task=%s] SSE disconnected after %dms", task_id, elapsed)
+        except Exception as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.exception("[task=%s] generate stream failed after %dms", task_id, elapsed)
+            # Keep SSE contract stable for frontend retries instead of surfacing HTTP 500.
+            payload = json.dumps({"message": f"生成失败: {e}"}, ensure_ascii=False)
+            yield f"event: error\ndata: {payload}\n\n"
+            yield "event: close\ndata: {}\n\n"
 
     return StreamingResponse(
         event_stream(),

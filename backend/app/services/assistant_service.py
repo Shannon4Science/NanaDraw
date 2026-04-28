@@ -161,6 +161,9 @@ class AssistantService:
                 "full_gen": "full_gen",
                 "image_only": "image_only",
                 "slides": "full_gen",
+                "free": "free",
+                "gpt_image": "gpt_image",
+                "text_edit": "text_edit",
             }
             forced = mode_map.get(selected_mode, selected_mode)
             if locale == "en":
@@ -168,12 +171,18 @@ class AssistantService:
                     "draft": "Draft Mode",
                     "full_gen": "Assembly Mode",
                     "image_only": "Image Mode",
+                    "free": "Free Mode",
+                    "gpt_image": "GPT Image 2 Trial",
+                    "text_edit": "Text Edit Mode",
                 }
             else:
                 label_map = {
                     "draft": "草稿模式",
                     "full_gen": "组装模式",
                     "image_only": "生成模式",
+                    "free": "自由模式",
+                    "gpt_image": "GPT Image 2 试用",
+                    "text_edit": "文本编辑模式",
                 }
             forced_label = label_map.get(forced, forced)
             system_prompt += (
@@ -277,6 +286,45 @@ class AssistantService:
                 "When modifying, output a complete mxGraphModel (not mxfile). "
                 "You can call modify_canvas to apply changes to the current page.\n"
             )
+
+        if selected_mode and selected_mode != "auto" and not regen_context:
+            mode_map = {
+                "fast": "draft",
+                "full_gen": "full_gen",
+                "image_only": "image_only",
+                "slides": "full_gen",
+                "free": "free",
+                "gpt_image": "gpt_image",
+                "text_edit": "text_edit",
+            }
+            forced = mode_map.get(selected_mode, selected_mode)
+            tool_args: dict[str, object] = {
+                "text": message,
+                "mode": forced,
+                "canvas_type": self._canvas_type,
+            }
+            if style_ref_id:
+                tool_args["style_ref_id"] = style_ref_id
+            if sketch_image_b64:
+                tool_args["sketch_image"] = sketch_image_b64
+            if self.image_model_override:
+                tool_args["image_model"] = self.image_model_override
+            if self.component_image_model_override:
+                tool_args["component_image_model"] = self.component_image_model_override
+
+            synthetic = _synthetic_pre_message("generate_diagram", tool_args, self._locale)
+            yield _sse("assistant_message", {"content": synthetic, "done": False})
+            yield _sse("tool_call", {"name": "generate_diagram", "arguments": tool_args})
+            async for evt in self._tool_generate_diagram(tool_args, nana_soul=nana_soul):
+                yield evt
+            summary = self._last_pipeline_error if self._last_pipeline_failed else (
+                "Diagram generated successfully and loaded onto the canvas."
+                if self._locale == "en"
+                else "图表已成功生成并加载到画布。"
+            )
+            yield _sse("tool_result", {"name": "generate_diagram", "summary": summary})
+            yield _sse("assistant_message", {"content": summary, "done": True})
+            return
 
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
@@ -634,10 +682,13 @@ class AssistantService:
         mode_str = args.get("mode", "full_gen")
         style_ref_id = args.get("style_ref_id") or self._style_ref_id
         color_scheme = args.get("color_scheme", "pastel")
-        image_model = args.get("image_model")
+        image_model = args.get("image_model") or self.image_model_override
 
-        image_only = mode_str == "image_only"
+        is_free = mode_str in ("free", "gpt_image")
+        is_text_edit = mode_str == "text_edit"
+        image_only = mode_str == "image_only" or is_free
         canvas_type = args.get("canvas_type") or self._canvas_type
+        model_preset = args.get("model_preset")
 
         if mode_str == "draft":
             gen_mode = GenerateMode.FAST
@@ -669,6 +720,10 @@ class AssistantService:
                 image_model=image_model,
                 component_image_model=self.component_image_model_override,
                 image_only=image_only,
+                gpt_image=mode_str == "gpt_image",
+                free=is_free,
+                text_edit=is_text_edit,
+                model_preset=model_preset,
                 canvas_type=canvas_type,
             ),
             sketch_image_b64=sketch_b64,

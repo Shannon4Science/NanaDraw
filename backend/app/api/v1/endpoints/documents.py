@@ -34,4 +34,5 @@ async def parse_pdf(file: UploadFile = File(...), _user=Depends(require_auth)):
     except MinerUError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"PDF 解析失败: {exc}") from exc
+        msg = str(exc).strip() or exc.__class__.__name__
+        raise HTTPException(status_code=502, detail=f"PDF 解析失败: {msg}") from exc
