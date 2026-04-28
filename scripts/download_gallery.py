@@ -9,24 +9,58 @@ the pipeline images into backend/static/gallery/.
 import subprocess
 import shutil
 import sys
+import time
+import zipfile
+import urllib.request
 from pathlib import Path
 
 REPO_URL = "https://github.com/LongHZ140516/PaperGallery.git"
 BRANCH = "web"
 IMAGE_SUBDIR = "public/images/pipeline"
 GALLERY_DIR = Path(__file__).resolve().parent.parent / "backend" / "static" / "gallery"
+ZIP_URL = f"https://codeload.github.com/LongHZ140516/PaperGallery/zip/refs/heads/{BRANCH}"
+
+
+def clone_repo(target_dir: str) -> bool:
+    """Try shallow clone with retries to tolerate transient network issues."""
+    cmd = ["git", "clone", "--depth", "1", "--branch", BRANCH, REPO_URL, target_dir]
+    for attempt in range(1, 4):
+        try:
+            print(f"Clone attempt {attempt}/3 ...")
+            subprocess.run(cmd, check=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            if attempt == 3:
+                print(f"Git clone failed after 3 attempts: {e}")
+                return False
+            sleep_s = attempt * 2
+            print(f"Clone failed, retrying in {sleep_s}s ...")
+            time.sleep(sleep_s)
+    return False
+
+
+def download_zip_and_extract(target_dir: str) -> Path:
+    """Fallback: download branch zip from codeload and extract."""
+    zip_path = Path(target_dir) / "papergallery.zip"
+    print(f"Falling back to ZIP download: {ZIP_URL}")
+    urllib.request.urlretrieve(ZIP_URL, zip_path)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(target_dir)
+    extracted = Path(target_dir) / f"PaperGallery-{BRANCH}"
+    if not extracted.exists():
+        raise FileNotFoundError(f"Extracted folder not found: {extracted}")
+    return extracted
 
 
 def main():
     import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
         print(f"\nCloning {REPO_URL} (branch: {BRANCH}) ...")
-        subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", BRANCH, REPO_URL, tmpdir],
-            check=True,
-        )
+        repo_root = Path(tmpdir)
+        if not clone_repo(tmpdir):
+            repo_root = download_zip_and_extract(tmpdir)
 
-        src_dir = Path(tmpdir) / IMAGE_SUBDIR
+        src_dir = repo_root / IMAGE_SUBDIR
         if not src_dir.exists():
             print(f"ERROR: {IMAGE_SUBDIR} not found in repository!")
             sys.exit(1)
