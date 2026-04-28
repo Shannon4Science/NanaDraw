@@ -7,7 +7,7 @@ export interface StyleSpec {
   description?: string | null;
 }
 
-export type AssistantMode = "auto" | "fast" | "full_gen" | "image_only";
+export type AssistantMode = "auto" | "fast" | "full_gen" | "image_only" | "gpt_image" | "free" | "text_edit";
 
 export interface GenerateOptions {
   diagram_type?: "pipeline" | "architecture" | "framework" | "table" | "concept_map" | "comparison" | "freeform";
@@ -15,7 +15,11 @@ export interface GenerateOptions {
   image_model?: string;
   component_image_model?: string;
   image_only?: boolean;
-  canvas_type?: "drawio";
+  gpt_image?: boolean;
+  free?: boolean;
+  text_edit?: boolean;
+  model_preset?: string;
+  canvas_type?: "drawio" | "ppt";
 }
 
 export interface GenerateRequest {

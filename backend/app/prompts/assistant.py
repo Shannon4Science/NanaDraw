@@ -102,6 +102,9 @@ these to the user):
    - 组装模式 (mode="full_gen"): reference image + component generation + assembly. \
 Best for publication-ready editable pipeline/architecture diagrams.
    - 生成模式 (mode="image_only"): high-quality bitmap directly. Posters, covers, illustrations.
+   - 自由模式 (mode="free"): single-step direct image generation from user text.
+   - 文本编辑模式 (mode="text_edit"): generate image background + editable text overlay.
+   - GPT Image 2 试用 (mode="gpt_image"): free-mode variant routed by GPT image preset.
    MODE SELECTION GUIDE: For pipeline/architecture/flowchart requests → prefer \
 组装模式 (full_gen). For posters, cover images, single illustrations → prefer \
 生成模式 (image_only).
@@ -128,7 +131,11 @@ Your workflow for ASSET generation:
 4. After the tool result, tell the user the assets are ready for preview.
 
 MODE INQUIRY (for auto mode — no [MODE CONSTRAINT] present):
-When process + style are sufficient but the user has NOT specified a mode, you may introduce modes:
+Auto mode should default to directly generating the diagram instead of asking the user to pick a mode.
+Use 组装模式 (full_gen) for pipeline/architecture/flowchart requests unless the user clearly asked for a different output type.
+Only ask a mode question if the request is genuinely ambiguous or missing essential information. If the request is sufficient, proceed to call generate_diagram immediately.
+
+When you do need to introduce modes, you may use:
 
 "信息收集好啦~ 香蕉宝宝有几种画图模式可以选哦 🎨
 📸 **生成模式** — 直接出一张高清位图，速度快效果好~
@@ -168,13 +175,16 @@ wait for confirmation if risky.
 Undo: if the user asks to undo after modify_canvas, re-apply the prior [CANVAS_XML] snapshot.
 
 INTERNAL NAME POLICY:
-- NEVER reveal internal identifiers (draft, full_gen, image_only) to the user. \
-Use user-facing Chinese names: 草稿模式, 组装模式, 生成模式.
+- NEVER reveal internal identifiers (draft, full_gen, image_only, free, text_edit, gpt_image) to the user. \
+Use user-facing Chinese names: 草稿模式, 组装模式, 生成模式, 自由模式, 文本编辑模式, GPT Image 2 试用.
 
 Rules:
 - "可编辑", "组装", "editable" → mode "full_gen"
 - "草稿", "快速", "draft", "quick" → mode "draft"
 - "生成模式", "图片", "image only", "预览" → mode "image_only"
+- "自由模式", "自由生成", "free mode" → mode "free"
+- "文本编辑", "文字可编辑", "text edit" → mode "text_edit"
+- "GPT Image", "GPT生图", "gpt image 2" → mode "gpt_image"
 - Icons/素材 → generate_assets
 - Default asset style "minimal_flat" unless specified.
 
@@ -192,7 +202,10 @@ ASSISTANT_TOOLS = [
             "description": (
                 "Generate a diagram from text. Modes: 'draft' (fast draw.io XML), "
                 "'full_gen' (component-based assembly, high quality), "
-                "'image_only' (single bitmap, posters/illustrations). "
+                "'image_only' (single bitmap, posters/illustrations), "
+                "'free' (single-step direct image), "
+                "'text_edit' (image + editable text overlay), "
+                "'gpt_image' (GPT image trial mode). "
                 "Style via style_ref_id (gallery) OR style_description (user text)."
             ),
             "parameters": {
@@ -204,9 +217,10 @@ ASSISTANT_TOOLS = [
                     },
                     "mode": {
                         "type": "string",
-                        "enum": ["draft", "full_gen", "image_only"],
+                        "enum": ["draft", "full_gen", "image_only", "free", "text_edit", "gpt_image"],
                         "description": (
-                            "draft: fast XML; full_gen: full pipeline; image_only: bitmap."
+                            "draft: fast XML; full_gen: full pipeline; image_only: bitmap; "
+                            "free: direct image; text_edit: image+editable text; gpt_image: GPT image trial."
                         ),
                         "default": "full_gen",
                     },
@@ -221,6 +235,10 @@ ASSISTANT_TOOLS = [
                     "image_model": {
                         "type": "string",
                         "description": "Optional image model override.",
+                    },
+                    "model_preset": {
+                        "type": "string",
+                        "description": "Optional model preset ID for free/gpt_image routing.",
                     },
                     "sketch_image": {
                         "type": "string",
