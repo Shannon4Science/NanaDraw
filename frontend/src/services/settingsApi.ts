@@ -50,7 +50,9 @@ async function parseErrorMessage(res: Response, fallback: string): Promise<strin
 
 async function fetchWithApiFallback(path: string, init?: RequestInit): Promise<Response> {
   const primary = await fetch(`${API_BASE}${path}`, init);
-  if (primary.status !== 404 || API_BASE === FALLBACK_API_BASE) return primary;
+  const contentType = (primary.headers.get("content-type") || "").toLowerCase();
+  const shouldFallback = primary.status === 404 || contentType.includes("text/html");
+  if (!shouldFallback) return primary;
   return fetch(`${FALLBACK_API_BASE}${path}`, init);
 }
 
