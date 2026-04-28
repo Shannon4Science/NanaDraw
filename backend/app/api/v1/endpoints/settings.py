@@ -106,8 +106,6 @@ def _to_response(data: dict[str, Any]) -> SettingsResponse:
         llm_component_model=str(data.get("llm_component_model", "") or ""),
         api_format=str(data.get("api_format", "") or "auto"),
         mineru_api_token=mask_api_key(str(data.get("mineru_api_token", ""))),
-        api_format=str(data.get("api_format", "") or "auto"),
-        mineru_api_token=mask_api_key(str(data.get("mineru_api_token", ""))),
         nana_soul=str(data.get("nana_soul", "") or ""),
         language=str(data.get("language", "") or "zh"),
         is_configured=bool(str(data.get("llm_api_key", "")).strip()),
