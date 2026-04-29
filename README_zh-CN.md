@@ -18,6 +18,7 @@
 
 - 🆕 NanaDraw 上线 GPT Image 2 模型供大家选择
 - 📝 粘贴方法描述文本，自动生成流程图
+- 📎 单一入口上传图片、PDF 或文本文件；图片作为草稿参考，PDF 经 MinerU 解析后引用选段绘图
 - 🎨 三种创作模式：草稿模式、生成模式、组装模式
 - 🖼️ 内置 250+ 学术论文风格参考图
 - 🧰 素材工坊集成 Bioicons、个人常用素材和 AI 生成素材
@@ -35,6 +36,15 @@
 | <img src="image/handwrite.jpg" alt="手绘草图示例" width="420"> | <img src="image/pipeline.png" alt="可编辑流程图示例" width="420"> |
 
 图 1 为用户上传的手绘草图，图 2 为系统生成的高保真可编辑流程图。
+
+### PDF 文档解析与引用选段绘图
+
+AI 工作台底部提供统一上传入口，支持图片、PDF、Markdown 和文本文件。NanaDraw 会按文件类型自动分流：图片作为草稿图参考，PDF 调用 MinerU 在线 API 解析为 Markdown，Markdown/Text 作为文本附件进入提示词参考。
+
+- 支持在草稿模式、生成模式、组装模式和自动模式中上传文件。
+- PDF 解析结果会显示在工作台左侧可滚动、可收起的浮窗中。
+- PDF 内容只用于 MinerU 文档解析；不会自动把整篇论文发送给 LLM。
+- 只有用户主动引用的选中文本会随提示词进入 NanaDraw 的生成流程；用户可以继续补充绘图要求后再生成。
 
 ### 多种模式
 
@@ -164,6 +174,7 @@ python start.py --dev
 - **图像模型**：默认 `gemini-3-pro-image-preview`
 - **组件模型**：默认 `gemini-3.1-flash-image-preview`
 - **NanaSoul**：用于风格约束的自定义 AI 角色
+- **文档解析 Token**：MinerU 在线 API Token，用于 PDF 解析
 
 #### 数据目录（环境变量）
 
